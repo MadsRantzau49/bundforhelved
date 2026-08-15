@@ -25,7 +25,7 @@ export default async function ClansPage() {
       <PageHeader
         eyebrow="Venner, rivaler, familie"
         title="Dine klaner"
-        description="Globale tider og klantider holdes adskilt, så hvert arrangement får sin egen tavle."
+        description="Klantider tæller både på arrangementets egen tavle og på den globale rangliste."
         action={<span className="header-clan"><UsersRound aria-hidden="true" /></span>}
       />
 

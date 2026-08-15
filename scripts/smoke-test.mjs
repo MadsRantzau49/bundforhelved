@@ -221,7 +221,7 @@ try {
   }
 
   const globalAttempt = await approveAttempt(owner);
-  const clanAttempt = await approveAttempt(owner, { selectedClan: clanId });
+  const clanAttempt = await approveAttempt(observer, { selectedClan: clanId });
   const globalBoard = await request(`${baseUrl}/rest/v1/rpc/get_leaderboard`, {
     method: "POST",
     headers: owner.headers,
@@ -235,8 +235,8 @@ try {
   if (!globalBoard.some((entry) => entry.attempt_id === globalAttempt.id)) {
     throw new Error("A Global attempt was missing from the Global leaderboard.");
   }
-  if (globalBoard.some((entry) => entry.attempt_id === clanAttempt.id)) {
-    throw new Error("A clan attempt leaked onto the Global leaderboard.");
+  if (!globalBoard.some((entry) => entry.attempt_id === clanAttempt.id)) {
+    throw new Error("A clan attempt was missing from the Global leaderboard.");
   }
   if (!clanBoard.some((entry) => entry.attempt_id === clanAttempt.id)) {
     throw new Error("A clan attempt was missing from its selected clan leaderboard.");

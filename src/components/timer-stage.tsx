@@ -491,7 +491,7 @@ export function TimerStage({
           ))}
         </div>
         <p className="timer-choice__hint">
-          Globale tider tæller kun globalt. En klantid tæller kun i den valgte klan.
+          Alle tider tæller globalt. Vælger du en klan, tæller tiden også på klanens tavle.
         </p>
       </div>
 

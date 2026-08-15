@@ -7,7 +7,7 @@ En mobil PWA til servermålt øl-timing, globale ranglister og private klaner. B
 - Serverbaseret start- og stoptid, som klienten ikke kan ændre.
 - Brugeren godkender selv resultatet, når øllen er tom.
 - Hurtigste godkendte tid pr. bruger og kategori.
-- Adskilte globale ranglister og private klan-/arrangementstavler via invitationskode.
+- Globale ranglister, hvor alle tider tæller, samt private klan-/arrangementstavler via invitationskode.
 - Gæstespillere på delte telefoner med godkendelse via engangskode under Mig.
 - Profilbilleder, komplet tidshistorik, personlige statistikker og langtidsholdbare login-sessioner.
 - Adminstyring af kategorier, brugere, kode-nulstilling og falske tider.
@@ -88,7 +88,7 @@ Migrationen opretter tabeller, indekser, Storage-bucket, RLS-politikker og RPC-f
 
 Anvendte Docker-migrationer kontrolleres med checksum. Ret ikke en allerede anvendt migrationsfil; tilføj en ny fil, eller brug `reset` til rent lokale data.
 
-Et forsøg går gennem statuserne `running`, `awaiting_confirmation` og derefter `approved` eller `declined`. Ranglisten vælges før start: `clan_id = null` betyder Global, mens en klan-id betyder, at tiden kun tæller på den klans tavle. En admin kan skifte et godkendt resultat til `invalidated`, hvilket fjerner det fra den relevante rangliste, men bevarer revisionssporet.
+Et forsøg går gennem statuserne `running`, `awaiting_confirmation` og derefter `approved` eller `declined`. Alle godkendte tider tæller på den globale rangliste. Ranglisten vælges før start: `clan_id = null` betyder kun Global, mens en klan-id betyder, at tiden også tæller på den valgte klans tavle. En admin kan skifte et godkendt resultat til `invalidated`, hvilket fjerner det fra alle relevante ranglister, men bevarer revisionssporet.
 
 Gæsteadgang giver kun en anden konto lov til at betjene timeren og tilskrive et resultat; den giver ikke adgang til gæstens profil, adgangskode eller administration. Et stoppet resultat kan flyttes til en godkendt gæst, inden det bekræftes. Hvis en klanejer slettes, overtager det ældste resterende medlem automatisk ejerskabet; en tom klan og dens klantider slettes.
 
