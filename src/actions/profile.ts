@@ -2,14 +2,35 @@
 
 import { revalidatePath } from "next/cache";
 import { requireProfile } from "@/lib/auth/session";
+import { getErrorText } from "@/lib/errors";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { formString, usernameSchema } from "@/lib/validation";
 import type { FormState } from "@/types/app";
 
-const ALLOWED_TYPES = new Map([
-  ["image/jpeg", "jpg"],
-  ["image/png", "png"],
-  ["image/webp", "webp"],
-]);
+export async function changeUsernameAction(
+  _previousState: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  await requireProfile();
+
+  try {
+    const requestedUsername = usernameSchema.parse(formString(formData, "username"));
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase.rpc("set_own_username", {
+      requested_username: requestedUsername,
+    });
+    if (error) {
+      if (error.code === "23505") return { error: "Brugernavnet er allerede taget." };
+      throw error;
+    }
+
+    revalidatePath("/", "layout");
+    return { success: "Brugernavnet er opdateret." };
+  } catch (error) {
+    const message = getErrorText(error);
+    return { error: message.startsWith("[") ? "Brugernavnet er ugyldigt." : message };
+  }
+}
 
 export async function uploadAvatarAction(
   _previousState: FormState,
@@ -18,13 +39,10 @@ export async function uploadAvatarAction(
   const profile = await requireProfile();
   const file = formData.get("avatar");
   if (!(file instanceof File) || file.size === 0) return { error: "Vælg et billede." };
-  if (file.size > 2 * 1024 * 1024) return { error: "Billedet må højst fylde 2 MB." };
-
-  const extension = ALLOWED_TYPES.get(file.type);
-  if (!extension) return { error: "Brug JPG, PNG eller WebP." };
+  if (!file.type.startsWith("image/")) return { error: "Filen skal være et billede." };
 
   const supabase = await createSupabaseServerClient();
-  const path = `${profile.id}/avatar-${Date.now()}.${extension}`;
+  const path = `${profile.id}/avatar-${Date.now()}`;
   const { error: uploadError } = await supabase.storage
     .from("avatars")
     .upload(path, file, { contentType: file.type, upsert: false });

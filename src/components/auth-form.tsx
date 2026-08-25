@@ -23,16 +23,13 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
             name="username"
             type="text"
             autoComplete="username"
-            autoCapitalize="none"
             spellCheck={false}
-            minLength={3}
-            maxLength={24}
-            pattern="[a-z0-9_]{3,24}"
-            placeholder="f.eks. ol_kongen"
+            maxLength={64}
+            placeholder="Dit brugernavn"
             required
           />
         </div>
-        {signup && <small>3-24 små bogstaver, tal eller underscore.</small>}
+        {signup && <small>Brug store eller små bogstaver og de tegn, du ønsker.</small>}
       </div>
 
       <div className="field">

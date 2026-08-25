@@ -8,6 +8,7 @@ import {
   Plus,
   Power,
   ShieldAlert,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import {
@@ -15,6 +16,7 @@ import {
   deleteUserAction,
   invalidateAttemptAction,
   resetUserPasswordAction,
+  setUserAdminAction,
   toggleCategoryAction,
 } from "@/actions/admin";
 import { Avatar } from "@/components/avatar";
@@ -141,6 +143,15 @@ export function AdminDashboard({
               <Avatar username={user.username} path={user.avatar_path} size="medium" />
               <div><strong>@{user.username}</strong><small>{user.role === "admin" ? "Administrator" : `Oprettet ${formatDate(user.created_at)}`}</small></div>
               <div className="admin-user__actions">
+                <button
+                  className={user.role === "admin" ? "icon-button icon-button--admin" : "icon-button"}
+                  title={user.role === "admin" ? "Fjern administrator" : "Gør til administrator"}
+                  disabled={pending || user.id === currentUserId}
+                  onClick={() => run(
+                    () => setUserAdminAction(user.id, user.role !== "admin"),
+                    user.role === "admin" ? "Adminrollen er fjernet." : "Brugeren er nu administrator.",
+                  )}
+                ><ShieldCheck aria-hidden="true" /></button>
                 <button
                   className="icon-button"
                   title="Nulstil adgangskode"

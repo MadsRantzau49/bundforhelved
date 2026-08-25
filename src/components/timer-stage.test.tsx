@@ -18,8 +18,7 @@ vi.mock("@/actions/attempts", () => ({
 }));
 
 vi.mock("@/actions/guests", () => ({
-  requestGuestAccess: vi.fn(),
-  redeemGuestAccess: vi.fn(),
+  connectGuestAccess: vi.fn(),
 }));
 
 const category: Category = {

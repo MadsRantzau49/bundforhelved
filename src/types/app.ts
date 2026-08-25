@@ -80,25 +80,6 @@ export type TimerPlayer = {
   needs_refresh?: boolean;
 };
 
-export type GuestRequestStart = {
-  request_id: string;
-  guest_id: string;
-  username: string;
-  avatar_path: string | null;
-  expires_at: string;
-};
-
-export type GuestRequest = {
-  request_id: string;
-  direction: "incoming" | "outgoing";
-  other_user_id: string;
-  username: string;
-  avatar_path: string | null;
-  created_at: string;
-  expires_at: string;
-  otp_issued: boolean;
-};
-
 export type GuestAccess = {
   direction: "guest" | "operator";
   other_user_id: string;

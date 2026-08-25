@@ -3,8 +3,8 @@ import { z } from "zod";
 export const usernameSchema = z
   .string()
   .trim()
-  .toLowerCase()
-  .regex(/^[a-z0-9_]{3,24}$/, "Brug 3-24 små bogstaver, tal eller underscore.");
+  .min(1, "Skriv et brugernavn.")
+  .max(64, "Brugernavnet må højst være 64 tegn.");
 
 export const passwordSchema = z
   .string()
@@ -18,11 +18,6 @@ export const clanNameSchema = z
   .max(64, "Navnet må højst være 64 tegn.");
 
 export const uuidSchema = z.string().uuid("Ugyldigt id.");
-
-export const otpSchema = z
-  .string()
-  .trim()
-  .regex(/^\d{6}$/, "Koden skal være seks cifre.");
 
 export function formString(formData: FormData, key: string) {
   const value = formData.get(key);
