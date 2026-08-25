@@ -3,7 +3,7 @@
 import { useActionState, useSyncExternalStore } from "react";
 import { Download, ImagePlus, KeyRound, Share, Smartphone } from "lucide-react";
 import { changePasswordAction } from "@/actions/auth";
-import { uploadAvatarAction } from "@/actions/profile";
+import { changeUsernameAction, uploadAvatarAction } from "@/actions/profile";
 import { FormMessage, SubmitButton } from "@/components/form-controls";
 import {
   clearPwaInstallPrompt,
@@ -20,15 +20,34 @@ export function AvatarForm() {
       <div>
         <p className="eyebrow">Nyt look</p>
         <h2>Profilbillede</h2>
-        <p>JPG, PNG eller WebP. Maks. 2 MB.</p>
+        <p>Vælg det billede og format, du ønsker.</p>
       </div>
       <label className="file-picker">
         <ImagePlus aria-hidden="true" />
         <span>Vælg billede</span>
-        <input name="avatar" type="file" accept="image/jpeg,image/png,image/webp" required />
+        <input name="avatar" type="file" accept="image/*" required />
       </label>
       <FormMessage {...state} />
       <SubmitButton className="button--secondary" pendingLabel="Uploader...">Gem billede</SubmitButton>
+    </form>
+  );
+}
+
+export function UsernameForm({ username }: { username: string }) {
+  const [state, action] = useActionState(changeUsernameAction, {});
+  return (
+    <form action={action} className="profile-form">
+      <div>
+        <p className="eyebrow">Dit navn</p>
+        <h2>Skift brugernavn</h2>
+        <p>Store og små bogstaver samt alle almindelige tegn er tilladt.</p>
+      </div>
+      <div className="field">
+        <label htmlFor="new-username">Brugernavn</label>
+        <input id="new-username" name="username" defaultValue={username} maxLength={64} required />
+      </div>
+      <FormMessage {...state} />
+      <SubmitButton className="button--secondary" pendingLabel="Gemmer...">Gem brugernavn</SubmitButton>
     </form>
   );
 }

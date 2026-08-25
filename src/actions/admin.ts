@@ -133,3 +133,26 @@ export async function resetUserPasswordAction(
     return { ok: false, error: errorMessage(error, "Adgangskoden kunne ikke nulstilles.") };
   }
 }
+
+export async function setUserAdminAction(
+  userId: string,
+  makeAdmin: boolean,
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  if (userId === admin.id) return { ok: false, error: "Du kan ikke ændre din egen adminrolle." };
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase
+      .from("profiles")
+      .update({ role: makeAdmin ? "admin" : "user" })
+      .eq("id", uuidSchema.parse(userId))
+      .select("id")
+      .single();
+    if (error) throw error;
+    revalidatePath("/admin");
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Adminrollen kunne ikke ændres.") };
+  }
+}

@@ -3,11 +3,11 @@ import { clanNameSchema, passwordSchema, usernameSchema } from "@/lib/validation
 
 describe("usernameSchema", () => {
   it("normalizes valid usernames", () => {
-    expect(usernameSchema.parse("  Ol_Kongen ")).toBe("ol_kongen");
+    expect(usernameSchema.parse("  Ol_Kongen ")).toBe("Ol_Kongen");
   });
 
-  it("rejects spaces and Danish letters in login identities", () => {
-    expect(() => usernameSchema.parse("øl kongen")).toThrow();
+  it("allows spaces, Danish letters, and mixed casing", () => {
+    expect(usernameSchema.parse("Øl Kongen")).toBe("Øl Kongen");
   });
 });
 

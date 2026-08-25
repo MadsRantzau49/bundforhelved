@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { KeyRound, UserPlus } from "lucide-react";
-import { redeemGuestAccess, requestGuestAccess } from "@/actions/guests";
-import type { GuestRequestStart, TimerPlayer } from "@/types/app";
+import { connectGuestAccess } from "@/actions/guests";
+import type { TimerPlayer } from "@/types/app";
 
 export function GuestConnectForm({
   onConnected,
@@ -13,83 +13,31 @@ export function GuestConnectForm({
   onCancel?: () => void;
 }) {
   const [username, setUsername] = useState("");
-  const [otp, setOtp] = useState("");
-  const [request, setRequest] = useState<GuestRequestStart>();
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
 
-  function sendRequest(event: React.FormEvent<HTMLFormElement>) {
+  function connect(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
     startTransition(async () => {
       try {
-        const result = await requestGuestAccess(username);
-        if (!result.ok) return setError(result.error);
-        setRequest(result.data);
-      } catch {
-        setError("Anmodningen kunne ikke sendes. Prøv igen.");
-      }
-    });
-  }
-
-  function redeem(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!request) return;
-    setError(undefined);
-    startTransition(async () => {
-      try {
-        const result = await redeemGuestAccess(request.request_id, otp);
+        const result = await connectGuestAccess(username, password);
         if (!result.ok) return setError(result.error);
         await onConnected(result.data);
       } catch {
-        setError("Koden kunne ikke godkendes. Opdater siden og prøv igen.");
+        setError("Gæsten kunne ikke tilføjes. Prøv igen.");
       }
     });
   }
 
-  if (request) {
-    return (
-      <form className="guest-connect" onSubmit={redeem}>
-        <div className="guest-connect__title">
-          <KeyRound aria-hidden="true" />
-          <div>
-            <strong>Kode fra @{request.username}</strong>
-            <span>Bed brugeren åbne Mig og trykke “Vis kode”.</span>
-          </div>
-        </div>
-        <div className="field">
-          <label htmlFor="guest-otp">Engangskode</label>
-          <input
-            id="guest-otp"
-            value={otp}
-            onChange={(event) => setOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            pattern="[0-9]{6}"
-            placeholder="000000"
-            required
-          />
-        </div>
-        {error && <p className="form-message form-message--error" role="alert">{error}</p>}
-        <div className="guest-connect__actions">
-          <button className="button button--small button--primary" disabled={pending || otp.length !== 6}>
-            {pending ? "Godkender..." : "Tilføj gæst"}
-          </button>
-          <button className="text-button" type="button" disabled={pending} onClick={() => setRequest(undefined)}>
-            Skift bruger
-          </button>
-        </div>
-      </form>
-    );
-  }
-
   return (
-    <form className="guest-connect" onSubmit={sendRequest}>
+    <form className="guest-connect" onSubmit={connect}>
       <div className="guest-connect__title">
         <UserPlus aria-hidden="true" />
         <div>
           <strong>Tilføj gæst</strong>
-          <span>Brugeren godkender telefonen med en kode under Mig.</span>
+          <span>Log ind med gæstens brugernavn og adgangskode.</span>
         </div>
       </div>
       <div className="field">
@@ -98,16 +46,30 @@ export function GuestConnectForm({
           id="guest-username"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
-          autoCapitalize="none"
           autoCorrect="off"
           placeholder="brugernavn"
           required
         />
       </div>
+      <div className="field">
+        <label htmlFor="guest-password">Adgangskode</label>
+        <div className="input-wrap">
+          <KeyRound aria-hidden="true" />
+          <input
+            id="guest-password"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            autoComplete="off"
+            maxLength={64}
+            required
+          />
+        </div>
+      </div>
       {error && <p className="form-message form-message--error" role="alert">{error}</p>}
       <div className="guest-connect__actions">
         <button className="button button--small button--primary" disabled={pending}>
-          {pending ? "Sender..." : "Send kode"}
+          {pending ? "Logger ind..." : "Tilføj gæst"}
         </button>
         {onCancel && (
           <button className="text-button" type="button" disabled={pending} onClick={onCancel}>

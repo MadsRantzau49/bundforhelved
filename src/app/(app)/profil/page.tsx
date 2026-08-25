@@ -13,11 +13,11 @@ import { logoutAction } from "@/actions/auth";
 import { Avatar } from "@/components/avatar";
 import { CategoryIcon } from "@/components/category-icon";
 import { ProfileGuestAccess } from "@/components/profile-guest-access";
-import { AvatarForm, InstallApp, PasswordForm } from "@/components/profile-forms";
+import { AvatarForm, InstallApp, PasswordForm, UsernameForm } from "@/components/profile-forms";
 import { requireProfile } from "@/lib/auth/session";
 import { formatDate, formatTime } from "@/lib/format";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { GuestAccess, GuestRequest } from "@/types/app";
+import type { GuestAccess } from "@/types/app";
 
 export const metadata: Metadata = { title: "Profil" };
 
@@ -44,7 +44,7 @@ type Membership = {
 export default async function ProfilePage() {
   const profile = await requireProfile();
   const supabase = await createSupabaseServerClient();
-  const [attemptsResult, membershipsResult, requestsResult, accessResult] = await Promise.all([
+  const [attemptsResult, membershipsResult, accessResult] = await Promise.all([
     supabase
       .from("attempts")
       .select("id, category_id, clan_id, elapsed_ms, confirmed_at, created_at, categories!inner(id, name, icon_key, accent_color)")
@@ -56,17 +56,15 @@ export default async function ProfilePage() {
       .from("clan_members")
       .select("clan_id, clans!clan_members_clan_id_fkey!inner(id, name)")
       .eq("user_id", profile.id),
-    supabase.rpc("list_guest_requests"),
     supabase.rpc("list_guest_access"),
   ]);
 
-  if (attemptsResult.error || membershipsResult.error || requestsResult.error || accessResult.error) {
+  if (attemptsResult.error || membershipsResult.error || accessResult.error) {
     throw new Error("Profildata kunne ikke hentes.");
   }
 
   const attempts = (attemptsResult.data ?? []) as unknown as ApprovedAttempt[];
   const memberships = (membershipsResult.data ?? []) as unknown as Membership[];
-  const requests = (requestsResult.data ?? []) as GuestRequest[];
   const guestAccess = (accessResult.data ?? []) as GuestAccess[];
   const clanNames = new Map(memberships.map((membership) => [membership.clan_id, membership.clans.name]));
   const bestByCategory = new Map<string, ApprovedAttempt>();
@@ -199,11 +197,12 @@ export default async function ProfilePage() {
         )}
       </section>
 
-      <ProfileGuestAccess initialRequests={requests} initialAccess={guestAccess} />
+      <ProfileGuestAccess initialAccess={guestAccess} />
 
       <InstallApp />
 
       <section className="profile-settings">
+        <UsernameForm username={profile.username} />
         <AvatarForm />
         <PasswordForm />
       </section>

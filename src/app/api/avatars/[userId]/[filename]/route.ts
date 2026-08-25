@@ -1,7 +1,7 @@
 import { getSupabaseServerEnv } from "@/lib/env";
 
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const filenamePattern = /^avatar-\d+\.(jpg|png|webp)$/;
+const filenamePattern = /^avatar-\d+(?:\.[a-z0-9]{1,16})?$/i;
 
 export async function GET(
   _request: Request,
@@ -21,6 +21,7 @@ export async function GET(
     headers: {
       "Content-Type": response.headers.get("content-type") || "application/octet-stream",
       "Cache-Control": "public, max-age=31536000, immutable",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
     },
   });
 }

@@ -2,12 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { ZodError } from "zod";
 import {
+  authenticateCredentials,
+  clearCredentialAttempts,
+  consumeCredentialAttempt,
   internalEmail,
+  InvalidCredentialsError,
   normalizeUsername,
-  privateRateLimitHash,
   providerPassword,
 } from "@/lib/auth/credentials";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -23,23 +25,6 @@ function validationError(error: unknown) {
   return "Noget gik galt. Prøv igen.";
 }
 
-async function consumeLoginAttempt(username: string) {
-  const requestHeaders = await headers();
-  const clientIp =
-    requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    requestHeaders.get("x-real-ip") ||
-    "unknown";
-  const identityHash = privateRateLimitHash("identity", username);
-  const ipHash = privateRateLimitHash("ip", clientIp);
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.rpc("consume_login_attempt", {
-    identity_hash: identityHash,
-    ip_hash: ipHash,
-  });
-  if (error) throw error;
-  return { admin, identityHash, ipHash };
-}
-
 export async function loginAction(
   _previousState: FormState,
   formData: FormData,
@@ -48,20 +33,20 @@ export async function loginAction(
 
   try {
     const username = normalizeUsername(formString(formData, "username"));
-    const password = providerPassword(formString(formData, "password"));
-    const throttle = await consumeLoginAttempt(username);
+    const throttle = await consumeCredentialAttempt(username);
+    const credentials = await authenticateCredentials(username, formString(formData, "password"));
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.auth.signInWithPassword({
-      email: internalEmail(username),
-      password,
+      email: credentials.email,
+      password: credentials.password,
     });
 
     if (error) return { error: "Forkert brugernavn eller adgangskode." };
-    await throttle.admin.rpc("clear_login_attempts", {
-      identity_hash: throttle.identityHash,
-      ip_hash: throttle.ipHash,
-    });
+    await clearCredentialAttempts(throttle);
   } catch (error) {
+    if (error instanceof InvalidCredentialsError) {
+      return { error: "Forkert brugernavn eller adgangskode." };
+    }
     if (getErrorText(error).toLowerCase().includes("rate limit")) {
       return { error: "For mange forsøg. Vent 15 minutter og prøv igen." };
     }
@@ -81,7 +66,7 @@ export async function signupAction(
     const username = normalizeUsername(formString(formData, "username"));
     const rawPassword = formString(formData, "password");
     passwordSchema.parse(rawPassword);
-    await consumeLoginAttempt(username);
+    await consumeCredentialAttempt(username);
     const email = internalEmail(username);
     const password = providerPassword(rawPassword);
     const admin = createSupabaseAdminClient();

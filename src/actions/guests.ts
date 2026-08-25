@@ -1,69 +1,42 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { errorMessage } from "@/lib/errors";
+import {
+  authenticateCredentials,
+  clearCredentialAttempts,
+  consumeCredentialAttempt,
+  InvalidCredentialsError,
+} from "@/lib/auth/credentials";
+import { requireProfile } from "@/lib/auth/session";
+import { errorMessage, getErrorText } from "@/lib/errors";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { otpSchema, usernameSchema, uuidSchema } from "@/lib/validation";
-import type {
-  ActionResult,
-  GuestAccess,
-  GuestRequestStart,
-  TimerPlayer,
-} from "@/types/app";
+import { usernameSchema, uuidSchema } from "@/lib/validation";
+import type { ActionResult, GuestAccess, TimerPlayer } from "@/types/app";
 
-function firstRow<T>(data: unknown) {
-  return (Array.isArray(data) ? data[0] : data) as T | undefined;
-}
-
-export async function requestGuestAccess(usernameValue: string): Promise<ActionResult<GuestRequestStart>> {
-  try {
-    const target_username = usernameSchema.parse(usernameValue);
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc("request_guest_access", { target_username });
-    if (error) throw error;
-    const request = firstRow<GuestRequestStart>(data);
-    if (!request) throw new Error("Guest request was not returned");
-    revalidatePath("/profil");
-    return { ok: true, data: request };
-  } catch (error) {
-    return { ok: false, error: errorMessage(error, "Gæsteanmodningen kunne ikke sendes.") };
-  }
-}
-
-export async function issueGuestOtp(requestId: string): Promise<ActionResult<string>> {
-  try {
-    const request = uuidSchema.parse(requestId);
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc("issue_guest_otp", { request });
-    if (error) throw error;
-    revalidatePath("/profil");
-    return { ok: true, data: data as string };
-  } catch (error) {
-    return { ok: false, error: errorMessage(error, "Gæstekoden kunne ikke oprettes.") };
-  }
-}
-
-export async function redeemGuestAccess(
-  requestId: string,
-  otpValue: string,
+export async function connectGuestAccess(
+  usernameValue: string,
+  passwordValue: string,
 ): Promise<ActionResult<TimerPlayer>> {
-  try {
-    const request = uuidSchema.parse(requestId);
-    const otp = otpSchema.parse(otpValue);
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.rpc("redeem_guest_access", { request, otp });
-    if (error) throw error;
-    const redemption = firstRow<{
-      success: boolean;
-      error_message: string | null;
-      player_id: string | null;
-      username: string | null;
-      avatar_path: string | null;
-    }>(data);
-    if (!redemption?.success || !redemption.player_id) {
-      return { ok: false, error: redemption?.error_message ?? "Koden kunne ikke godkendes." };
-    }
+  const profile = await requireProfile();
 
+  try {
+    const username = usernameSchema.parse(usernameValue);
+    const throttle = await consumeCredentialAttempt(username);
+    const guest = await authenticateCredentials(username, passwordValue);
+    await clearCredentialAttempts(throttle);
+    if (guest.id === profile.id) return { ok: false, error: "Du kan ikke tilføje dig selv som gæst." };
+
+    const service = createSupabaseAdminClient();
+    const { error: accessError } = await service.from("guest_access").upsert({
+      operator_id: profile.id,
+      guest_id: guest.id,
+      request_id: null,
+      granted_at: new Date().toISOString(),
+      revoked_at: null,
+    }, { onConflict: "operator_id,guest_id" });
+    if (accessError) throw accessError;
+    const supabase = await createSupabaseServerClient();
     revalidatePath("/timer");
     revalidatePath("/profil");
     const { data: playersData, error: playersError } = await supabase.rpc("get_timer_players");
@@ -71,9 +44,9 @@ export async function redeemGuestAccess(
       return {
         ok: true,
         data: {
-          player_id: redemption.player_id,
-          username: redemption.username ?? "gæst",
-          avatar_path: redemption.avatar_path,
+          player_id: guest.id,
+          username: guest.username,
+          avatar_path: null,
           is_host: false,
           clans: [],
           needs_refresh: true,
@@ -81,19 +54,25 @@ export async function redeemGuestAccess(
       };
     }
     const player = ((playersData ?? []) as TimerPlayer[]).find(
-      (item) => item.player_id === redemption.player_id,
+      (item) => item.player_id === guest.id,
     );
     const resolvedPlayer = player ?? {
-      player_id: redemption.player_id,
-      username: redemption.username ?? "gæst",
-      avatar_path: redemption.avatar_path,
+      player_id: guest.id,
+      username: guest.username,
+      avatar_path: null,
       is_host: false,
       clans: [],
     };
 
     return { ok: true, data: resolvedPlayer };
   } catch (error) {
-    return { ok: false, error: errorMessage(error, "Gæstekoden kunne ikke godkendes.") };
+    if (error instanceof InvalidCredentialsError) {
+      return { ok: false, error: "Forkert brugernavn eller adgangskode." };
+    }
+    if (getErrorText(error).toLowerCase().includes("rate limit")) {
+      return { ok: false, error: "For mange forsøg. Vent 15 minutter og prøv igen." };
+    }
+    return { ok: false, error: errorMessage(error, "Gæsten kunne ikke tilføjes.") };
   }
 }
 
