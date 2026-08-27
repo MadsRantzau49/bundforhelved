@@ -39,11 +39,11 @@ export function ClanForms() {
             <input
               id="invite-code"
               name="inviteCode"
-              minLength={24}
-              maxLength={24}
-              autoCapitalize="none"
+              inputMode="numeric"
+              minLength={6}
+              maxLength={6}
               spellCheck={false}
-              placeholder="24 tegn"
+              placeholder="123456"
               required
             />
           </div>

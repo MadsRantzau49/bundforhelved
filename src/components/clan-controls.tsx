@@ -1,17 +1,19 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useActionState, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Crown, LogOut, RefreshCw, Shield, Trash2, UserMinus } from "lucide-react";
+import { Check, Copy, Crown, LogOut, RefreshCw, Shield, Trash2, UserMinus, UserPlus } from "lucide-react";
 import {
+  addFriendToClanAction,
   deleteClanAction,
   leaveClanAction,
   regenerateCodeAction,
   removeClanMemberAction,
   transferClanAction,
+  updateClanAction,
 } from "@/actions/clans";
 import { Avatar } from "@/components/avatar";
-import type { ActionResult, Clan, ClanRole, Profile } from "@/types/app";
+import type { ActionResult, Clan, ClanRole, Friendship, Profile } from "@/types/app";
 
 type Member = {
   user_id: string;
@@ -23,10 +25,12 @@ type Member = {
 export function ClanControls({
   clan,
   members,
+  friends,
   currentUserId,
 }: {
   clan: Clan;
   members: Member[];
+  friends: Friendship[];
   currentUserId: string;
 }) {
   const router = useRouter();
@@ -38,6 +42,8 @@ export function ClanControls({
   const [copied, setCopied] = useState(false);
   const [copying, setCopying] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [detailsState, detailsAction, detailsPending] = useActionState(updateClanAction.bind(null, clan.id), {});
+  const availableFriends = friends.filter((friend) => !members.some((member) => member.user_id === friend.other_user_id));
 
   async function copyCode() {
     if (copying || pending) return;
@@ -137,6 +143,30 @@ export function ClanControls({
         )}
       </section>
 
+      {isOwner && (
+        <section className="clan-settings panel">
+          <p className="eyebrow">Klanadministration</p>
+          <h2>Navn og profilbillede</h2>
+          <p>Kun klanens ejer kan ændre disse oplysninger.</p>
+          <form action={detailsAction}>
+            <input type="hidden" name="currentImagePath" value={clan.image_path ?? ""} />
+            <div className="field">
+              <label htmlFor="clan-settings-name">Klannavn</label>
+              <input id="clan-settings-name" name="name" defaultValue={clan.name} minLength={2} maxLength={64} required />
+            </div>
+            <div className="field">
+              <label htmlFor="clan-image">Profilbillede</label>
+              <input id="clan-image" name="image" type="file" accept="image/jpeg,image/png,image/webp" />
+            </div>
+            {detailsState.error && <p className="form-message form-message--error" role="alert">{detailsState.error}</p>}
+            {detailsState.success && <p className="form-message form-message--success" role="status">{detailsState.success}</p>}
+            <button className="button button--primary" disabled={detailsPending}>
+              {detailsPending ? "Gemmer..." : "Gem ændringer"}
+            </button>
+          </form>
+        </section>
+      )}
+
       <section className="members-section">
         <div className="section-heading">
           <div><p className="eyebrow">Holdkortet</p><h2>{members.length} medlemmer</h2></div>
@@ -179,6 +209,34 @@ export function ClanControls({
           ))}
         </div>
       </section>
+
+      {isOwner && (
+        <section className="members-section">
+          <div className="section-heading">
+            <div><p className="eyebrow">Dine venner</p><h2>Tilføj til klanen</h2></div>
+          </div>
+          {availableFriends.length ? (
+            <div className="member-list">
+              {availableFriends.map((friend) => (
+                <article className="member-row" key={friend.other_user_id}>
+                  <Avatar username={friend.username} path={friend.avatar_path} size="medium" />
+                  <div><strong>@{friend.username}</strong><small>Accepteret ven</small></div>
+                  <button
+                    className="button button--ghost button--small"
+                    disabled={pending}
+                    onClick={() => run(
+                      () => addFriendToClanAction(clan.id, friend.other_user_id),
+                      () => setMessage(`@${friend.username} er tilføjet til klanen.`),
+                    )}
+                  >
+                    <UserPlus aria-hidden="true" /> Tilføj
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : <div className="inline-empty">Alle dine venner er allerede med, eller du har ingen accepterede venner endnu.</div>}
+        </section>
+      )}
 
       {message && (
         <p

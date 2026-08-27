@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { startAttempt, syncAttemptElapsed } from "@/actions/attempts";
+import { confirmAttempt, startAttempt, syncAttemptElapsed } from "@/actions/attempts";
 import { TimerStage } from "@/components/timer-stage";
 import type { Attempt, Category, TimerPlayer } from "@/types/app";
 
@@ -14,7 +14,9 @@ vi.mock("@/actions/attempts", () => ({
   confirmAttempt: vi.fn(),
   declineAttempt: vi.fn(),
   reassignAttempt: vi.fn(),
+  changeAttemptScope: vi.fn(),
   syncAttemptElapsed: vi.fn(),
+  uploadAttemptEvidence: vi.fn(),
 }));
 
 vi.mock("@/actions/guests", () => ({
@@ -27,6 +29,10 @@ const category: Category = {
   icon_key: "bottle",
   accent_color: "#D97706",
   description: "Test",
+  image_path: null,
+  guide_text: "",
+  guide_video_path: null,
+  demo_video_path: null,
   sort_order: 1,
   is_active: true,
 };
@@ -115,5 +121,88 @@ describe("TimerStage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /start timeren/i }));
     await waitFor(() => expect(startAttempt).toHaveBeenCalledWith(category.id, null, host.player_id));
+  });
+
+  it("submits a stopped attempt for review by friends without a code", async () => {
+    vi.mocked(confirmAttempt).mockResolvedValue({
+      ok: true,
+      data: attempt({
+        status: "pending_review",
+        stopped_at: "2099-01-01T00:00:02.000Z",
+        elapsed_ms: 2_000,
+        submitted_for_review_at: "2099-01-01T00:00:03.000Z",
+      }),
+    });
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={attempt({
+          status: "awaiting_confirmation",
+          stopped_at: "2099-01-01T00:00:02.000Z",
+          elapsed_ms: 2_000,
+        })}
+        attemptCategory={null}
+        initialElapsedMs={2_000}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /send til peer review/i }));
+    await waitFor(() => expect(confirmAttempt).toHaveBeenCalled());
+    expect(screen.getByText(/accepterede venner kan nu bedømme tiden direkte/i)).toBeInTheDocument();
+    expect(screen.queryByText(/reviewkode/i)).not.toBeInTheDocument();
+  });
+
+  it("explains that phone video needs HTTPS and keeps the timer usable", async () => {
+    vi.stubGlobal("isSecureContext", false);
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={null}
+        attemptCategory={null}
+        initialElapsedMs={0}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /optag forsøget/i }));
+    fireEvent.click(screen.getByRole("button", { name: /gå til start/i }));
+
+    expect(await screen.findByText(/video kræver https/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start timeren/i })).toBeEnabled();
+  });
+
+  it("switches from the rear to the front camera", async () => {
+    const rearTrack = { stop: vi.fn() };
+    const frontTrack = { stop: vi.fn() };
+    const getUserMedia = vi.fn()
+      .mockResolvedValueOnce({ getTracks: () => [rearTrack] })
+      .mockResolvedValueOnce({ getTracks: () => [frontTrack] });
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia } });
+    vi.stubGlobal("MediaRecorder", class {});
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={null}
+        attemptCategory={null}
+        initialElapsedMs={0}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /optag forsøget/i }));
+    fireEvent.click(screen.getByRole("button", { name: /gå til start/i }));
+
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledWith({ video: { facingMode: "environment" }, audio: false }));
+    const switchButton = await screen.findByRole("button", { name: /skift til frontkamera/i });
+    await waitFor(() => expect(switchButton).toBeEnabled());
+    fireEvent.click(switchButton);
+
+    await waitFor(() => expect(getUserMedia).toHaveBeenLastCalledWith({ video: { facingMode: "user" }, audio: false }));
+    expect(rearTrack.stop).toHaveBeenCalled();
   });
 });

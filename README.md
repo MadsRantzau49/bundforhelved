@@ -8,6 +8,8 @@ En mobil PWA til servermålt øl-timing, globale ranglister og private klaner. B
 - Brugeren godkender selv resultatet, når øllen er tom.
 - Hurtigste godkendte tid pr. bruger og kategori.
 - Globale ranglister, hvor alle tider tæller, samt private klan-/arrangementstavler via invitationskode.
+- Accepterede venner med en separat vennerangliste og vennebaseret peer review uden delte koder.
+- Frivillig videodokumentation til peer review.
 - Gæstespillere på delte telefoner med godkendelse via engangskode under Mig.
 - Profilbilleder, komplet tidshistorik, personlige statistikker og langtidsholdbare login-sessioner.
 - Adminstyring af kategorier, brugere, kode-nulstilling og falske tider.
@@ -33,13 +35,13 @@ Start hele appen, inklusive den lokale Supabase-stack, med:
 
 Første start genererer unikke lokale nøgler i `.env.docker`, bygger appen, kører migrationerne og opretter en administrator. Åbn derefter [http://localhost:3000](http://localhost:3000), og log ind med `admin` / `123`. Appen er tilgængelig på maskinens lokale netværksadresse; Supabase-gatewayen er kun bundet til `127.0.0.1`.
 
-Installation som PWA på en fysisk telefon kræver en HTTPS-adresse, som telefonen stoler på. `http://localhost` virker som sikker udviklingskontekst på værtsmaskinen, men `http://192.168.x.x:3000` gør ikke. Brug derfor en HTTPS-reverse-proxy eller en normal HTTPS-deployment, og behold `AUTH_COOKIE_SECURE=true`, når appen bruges uden for lokal udvikling.
+Installation som PWA og kameraoptagelse på en fysisk telefon kræver en HTTPS-adresse, som telefonen stoler på. `http://localhost` virker som sikker udviklingskontekst på værtsmaskinen, men `http://192.168.x.x:3000` gør ikke. Brug derfor en HTTPS-reverse-proxy eller en normal HTTPS-deployment, og behold `AUTH_COOKIE_SECURE=true`, når appen bruges uden for lokal udvikling.
 
 Postgres-data og profilbilleder gemmes i Docker volumes og overlever `down`, genstart og rebuild. Standardkoden er kun egnet til lokal udvikling; kør `./scripts/docker.sh secrets`, og ret `BOOTSTRAP_ADMIN_USERNAME` eller `BOOTSTRAP_ADMIN_PASSWORD` i `.env.docker` før den første `up`, hvis andre har adgang til maskinen. På en eksisterende database kan adgangskoden anvendes med `./scripts/docker.sh reset-admin`; ændring af bootstrap-brugernavnet kræver `reset` for også at fjerne den gamle administrator.
 
 Nyttige kommandoer:
 
-- `./scripts/docker.sh test`: gennemfør en opryddende smoke-test af app, Auth, RLS, timer, klaner og Storage
+- `./scripts/docker.sh test`: gennemfør en opryddende smoke-test af app, Auth, RLS, timer, venner, klaner og Storage
 - `./scripts/docker.sh status`: vis service-status og healthchecks
 - `./scripts/docker.sh logs app`: følg loggen for appen; udelad servicenavnet for alle logs
 - `./scripts/docker.sh psql`: åbn en Postgres-shell
@@ -52,7 +54,7 @@ Nyttige kommandoer:
 Forudsætninger: Node.js 22 eller nyere, npm og et Supabase-projekt.
 
 1. Installer pakkerne med `npm install`.
-2. Kør `supabase/migrations/20260801000000_initial.sql` i Supabase SQL Editor. Med Supabase CLI kan migrationen i stedet køres med `supabase db push`.
+2. Kør alle filer i `supabase/migrations` i navnerækkefølge i Supabase SQL Editor. Med Supabase CLI kan migrationerne i stedet køres med `supabase db push`.
 3. Sørg for, at Email provider er aktiv under Authentication > Providers, men deaktivér offentlige nyregistreringer. Appen opretter kun brugere gennem serverens Admin API og bekræfter den interne identitet direkte.
 4. Kopiér værdierne fra `.env.example` til `.env.local`, og udfyld alle fire værdier.
 5. Generér `AUTH_PASSWORD_PEPPER` med eksempelvis `openssl rand -base64 32`. Skift ikke værdien senere, da eksisterende adgangskoder ellers ikke længere kan afledes.
@@ -88,7 +90,7 @@ Migrationen opretter tabeller, indekser, Storage-bucket, RLS-politikker og RPC-f
 
 Anvendte Docker-migrationer kontrolleres med checksum. Ret ikke en allerede anvendt migrationsfil; tilføj en ny fil, eller brug `reset` til rent lokale data.
 
-Et forsøg går gennem statuserne `running`, `awaiting_confirmation` og derefter `approved` eller `declined`. Alle godkendte tider tæller på den globale rangliste. Ranglisten vælges før start: `clan_id = null` betyder kun Global, mens en klan-id betyder, at tiden også tæller på den valgte klans tavle. En admin kan skifte et godkendt resultat til `invalidated`, hvilket fjerner det fra alle relevante ranglister, men bevarer revisionssporet.
+Et forsøg går gennem statuserne `running`, `awaiting_confirmation`, `pending_review` og derefter `approved` eller `declined`. En accepteret ven, som hverken ejer eller optog forsøget, kan peer reviewe det uden en delt kode. Alle indsendte tider tæller på den globale rangliste, mens Venner filtrerer tavlen til brugeren og accepterede venner. Ranglisten vælges før start: `clan_id = null` betyder kun Global, mens en klan-id betyder, at tiden også tæller på den valgte klans tavle. En admin kan skifte et stoppet resultat til `invalidated`, hvilket fjerner det fra alle relevante ranglister, men bevarer revisionssporet.
 
 Gæsteadgang giver kun en anden konto lov til at betjene timeren og tilskrive et resultat; den giver ikke adgang til gæstens profil, adgangskode eller administration. Et stoppet resultat kan flyttes til en godkendt gæst, inden det bekræftes. Hvis en klanejer slettes, overtager det ældste resterende medlem automatisk ejerskabet; en tom klan og dens klantider slettes.
 

@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
+import { createServerClient } from "@supabase/ssr";
 
 const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "http://localhost:8000";
 const appUrl = "http://localhost:3000";
@@ -55,6 +56,7 @@ const serviceHeaders = {
   "Content-Type": "application/json",
 };
 const temporaryUserIds = [];
+const evidencePaths = [];
 let attemptId;
 const additionalAttemptIds = new Set();
 let clanId;
@@ -78,12 +80,45 @@ async function createTemporaryUser() {
   });
   temporaryUserIds.push(user.id);
   const token = await signIn(username, rawPassword);
-  return { id: user.id, username, headers: userHeaders(token.access_token) };
+  return {
+    id: user.id,
+    username,
+    headers: userHeaders(token.access_token),
+    cookie: await appSessionCookie(token),
+  };
+}
+
+async function appSessionCookie(session) {
+  const jar = new Map();
+  const supabase = createServerClient(baseUrl, anonKey, {
+    cookies: {
+      getAll: () => [...jar].map(([name, value]) => ({ name, value })),
+      setAll: (cookies) => cookies.forEach(({ name, value }) => jar.set(name, value)),
+    },
+  });
+  const { error } = await supabase.auth.setSession({
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+  });
+  if (error) throw error;
+
+  const publicProject = new URL(baseUrl).hostname.split(".")[0];
+  const appProject = process.env.APP_SUPABASE_COOKIE_PROJECT || "gateway";
+  return [...jar]
+    .map(([name, value]) => `${name.replace(`sb-${publicProject}-`, `sb-${appProject}-`)}=${value}`)
+    .join("; ");
 }
 
 try {
-  const appHtml = await request(`${appUrl}/login`);
+  const appResponse = await fetch(`${appUrl}/login`);
+  const appHtml = await appResponse.text();
+  if (!appResponse.ok) throw new Error(`The Next.js login page failed (${appResponse.status}).`);
   if (!appHtml.includes("bund forhelved")) throw new Error("The Next.js login page did not render.");
+  if (!appResponse.headers.get("permissions-policy")?.includes("camera=(self)")) {
+    throw new Error("The application does not allow its own camera capture.");
+  }
+  const healthResponse = await fetch(`${appUrl}/api/health`, { method: "HEAD", cache: "no-store" });
+  if (healthResponse.status !== 204) throw new Error(`The application health check failed (${healthResponse.status}).`);
 
   const manifest = await request(`${appUrl}/manifest.webmanifest`);
   if (
@@ -122,10 +157,24 @@ try {
   ) {
     throw new Error("The bootstrap profile is missing or is not an administrator.");
   }
+  const adminSession = await signIn(adminUsername, process.env.BOOTSTRAP_ADMIN_PASSWORD ?? "123");
+  const adminPageResponse = await fetch(`${appUrl}/admin`, {
+    headers: { Cookie: await appSessionCookie(adminSession) },
+    redirect: "manual",
+  });
+  const adminPage = await adminPageResponse.text();
+  if (
+    adminPageResponse.status !== 200 ||
+    !adminPage.includes("Kontrolrummet") ||
+    adminPage.includes("Data kunne ikke hentes lige nu")
+  ) {
+    throw new Error(`The authenticated administrator page did not render (${adminPageResponse.status}).`);
+  }
 
   const owner = await createTemporaryUser();
   const observer = await createTemporaryUser();
   const outsider = await createTemporaryUser();
+  const clanFriend = await createTemporaryUser();
   const ownerProfiles = await request(`${baseUrl}/rest/v1/profiles?id=eq.${owner.id}&select=id,username,role`, {
     headers: owner.headers,
   });
@@ -188,6 +237,7 @@ try {
     body: JSON.stringify({ name: `Docker test ${Date.now()}` }),
   });
   clanId = clan.id;
+  if (!/^\d{6}$/.test(clan.invite_code)) throw new Error("Clan invitation code was not reduced to six digits.");
   const hiddenClans = await request(`${baseUrl}/rest/v1/clans?id=eq.${clanId}&select=id`, {
     headers: observer.headers,
   });
@@ -199,7 +249,54 @@ try {
     body: JSON.stringify({ invite_code: clan.invite_code }),
   });
 
-  async function approveAttempt(actor, { player = actor.id, selectedClan = null } = {}) {
+  async function requestAndAcceptFriend(requester, recipient) {
+    const friendshipId = await request(`${baseUrl}/rest/v1/rpc/request_friend`, {
+      method: "POST",
+      headers: requester.headers,
+      body: JSON.stringify({ target_username: recipient.username }),
+    });
+    const incoming = await request(`${baseUrl}/rest/v1/rpc/list_friendships`, {
+      method: "POST",
+      headers: recipient.headers,
+      body: "{}",
+    });
+    if (!incoming.some((item) => item.friendship_id === friendshipId && item.direction === "incoming")) {
+      throw new Error("A friend request was not visible to its recipient.");
+    }
+    await request(`${baseUrl}/rest/v1/rpc/respond_friend_request`, {
+      method: "POST",
+      headers: recipient.headers,
+      body: JSON.stringify({ friendship: friendshipId, accept: true }),
+    });
+    const accepted = await request(`${baseUrl}/rest/v1/rpc/list_friendships`, {
+      method: "POST",
+      headers: requester.headers,
+      body: "{}",
+    });
+    if (!accepted.some((item) => item.friendship_id === friendshipId && item.direction === "friend")) {
+      throw new Error("An accepted friendship was not mutual.");
+    }
+    return friendshipId;
+  }
+
+  await requestAndAcceptFriend(owner, observer);
+  await requestAndAcceptFriend(owner, clanFriend);
+  await request(`${baseUrl}/rest/v1/rpc/add_friend_to_clan`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ clan: clanId, friend: clanFriend.id }),
+  });
+  const addedFriendMembership = await request(
+    `${baseUrl}/rest/v1/clan_members?clan_id=eq.${clanId}&user_id=eq.${clanFriend.id}&select=user_id`,
+    { headers: clanFriend.headers },
+  );
+  if (addedFriendMembership.length !== 1) throw new Error("A clan owner could not add an accepted friend to the clan.");
+
+  async function approveAttempt(actor, reviewer, {
+    player = actor.id,
+    selectedClan = null,
+    withEvidence = false,
+  } = {}) {
     const created = await request(`${baseUrl}/rest/v1/rpc/start_attempt`, {
       method: "POST",
       headers: actor.headers,
@@ -213,24 +310,112 @@ try {
       body: JSON.stringify({ attempt: created.id }),
     });
     if (stoppedAttempt.elapsed_ms <= 0) throw new Error("A scoped timer did not advance.");
-    return request(`${baseUrl}/rest/v1/rpc/confirm_attempt`, {
+    let evidencePath;
+    if (withEvidence) {
+      evidencePath = `${created.id}/evidence-${Date.now()}.webm`;
+      evidencePaths.push(evidencePath);
+      await request(`${baseUrl}/storage/v1/object/attempt-videos/${evidencePath}`, {
+        method: "POST",
+        headers: { ...actor.headers, "Content-Type": "video/webm", "x-upsert": "false" },
+        body: Buffer.from("docker-smoke-video"),
+      });
+      const withStoredEvidence = await request(`${baseUrl}/rest/v1/rpc/set_attempt_evidence`, {
+        method: "POST",
+        headers: actor.headers,
+        body: JSON.stringify({ attempt: created.id, path: evidencePath }),
+      });
+      if (withStoredEvidence.evidence_video_path !== evidencePath) {
+        throw new Error("Attempt evidence was not associated with its attempt.");
+      }
+    }
+    const submitted = await request(`${baseUrl}/rest/v1/rpc/confirm_attempt`, {
       method: "POST",
       headers: actor.headers,
       body: JSON.stringify({ attempt: created.id }),
     });
+    if (submitted.status !== "pending_review" || submitted.review_code !== null) {
+      throw new Error("A locally confirmed attempt was not submitted for code-free peer review.");
+    }
+    const reviewerQueue = await request(`${baseUrl}/rest/v1/rpc/list_peer_review_attempts`, {
+      method: "POST",
+      headers: reviewer.headers,
+      body: "{}",
+    });
+    if (!reviewerQueue.some((item) => item.attempt_id === created.id)) {
+      throw new Error("A friend's pending attempt was missing from the review queue.");
+    }
+    const outsiderQueue = await request(`${baseUrl}/rest/v1/rpc/list_peer_review_attempts`, {
+      method: "POST",
+      headers: outsider.headers,
+      body: "{}",
+    });
+    if (outsiderQueue.some((item) => item.attempt_id === created.id)) {
+      throw new Error("A pending attempt leaked into an unrelated user's review queue.");
+    }
+    if (evidencePath) {
+      await request(`${baseUrl}/storage/v1/object/attempt-videos/${evidencePath}`, {
+        headers: reviewer.headers,
+      });
+      await request(`${baseUrl}/storage/v1/object/attempt-videos/${evidencePath}`, {
+        headers: outsider.headers,
+        expected: [400, 401, 403, 404],
+      });
+      const proxiedVideo = await fetch(`${appUrl}/api/attempt-videos/${evidencePath}`, {
+        headers: { Cookie: reviewer.cookie, Range: "bytes=0-5" },
+      });
+      if (![200, 206].includes(proxiedVideo.status) || !(await proxiedVideo.arrayBuffer()).byteLength) {
+        throw new Error(`The same-origin friend video proxy failed (${proxiedVideo.status}).`);
+      }
+      const hiddenVideo = await fetch(`${appUrl}/api/attempt-videos/${evidencePath}`, {
+        headers: { Cookie: outsider.cookie },
+      });
+      if (hiddenVideo.status !== 403) {
+        throw new Error(`The video proxy exposed evidence to a non-friend (${hiddenVideo.status}).`);
+      }
+      const anonymousVideo = await fetch(`${appUrl}/api/attempt-videos/${evidencePath}`);
+      if (anonymousVideo.status !== 401) {
+        throw new Error(`The video proxy exposed evidence without a session (${anonymousVideo.status}).`);
+      }
+    }
+    await request(`${baseUrl}/rest/v1/rpc/review_attempt`, {
+      method: "POST",
+      headers: outsider.headers,
+      body: JSON.stringify({ attempt: created.id, approve: true }),
+      expected: [400, 401, 403],
+    });
+    await request(`${baseUrl}/rest/v1/rpc/review_attempt`, {
+      method: "POST",
+      headers: actor.headers,
+      body: JSON.stringify({ attempt: created.id, approve: true }),
+      expected: [400, 401, 403],
+    });
+    const reviewed = await request(`${baseUrl}/rest/v1/rpc/review_attempt`, {
+      method: "POST",
+      headers: reviewer.headers,
+      body: JSON.stringify({ attempt: created.id, approve: true }),
+    });
+    if (reviewed.status !== "approved" || reviewed.reviewed_by !== reviewer.id) {
+      throw new Error("A peer reviewer did not approve the submitted attempt.");
+    }
+    return reviewed;
   }
 
-  const globalAttempt = await approveAttempt(owner);
-  const clanAttempt = await approveAttempt(observer, { selectedClan: clanId });
+  const globalAttempt = await approveAttempt(owner, observer, { withEvidence: true });
+  const clanAttempt = await approveAttempt(observer, owner, { selectedClan: clanId });
   const globalBoard = await request(`${baseUrl}/rest/v1/rpc/get_leaderboard`, {
     method: "POST",
     headers: owner.headers,
-    body: JSON.stringify({ category: categories[0].id, clan: null }),
+    body: JSON.stringify({ category: categories[0].id, clan: null, friends_only: false }),
   });
   const clanBoard = await request(`${baseUrl}/rest/v1/rpc/get_leaderboard`, {
     method: "POST",
     headers: owner.headers,
-    body: JSON.stringify({ category: categories[0].id, clan: clanId }),
+    body: JSON.stringify({ category: categories[0].id, clan: clanId, friends_only: false }),
+  });
+  const friendsBoard = await request(`${baseUrl}/rest/v1/rpc/get_leaderboard`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ category: categories[0].id, clan: null, friends_only: true }),
   });
   if (!globalBoard.some((entry) => entry.attempt_id === globalAttempt.id)) {
     throw new Error("A Global attempt was missing from the Global leaderboard.");
@@ -243,6 +428,31 @@ try {
   }
   if (clanBoard.some((entry) => entry.attempt_id === globalAttempt.id)) {
     throw new Error("A Global attempt leaked onto a clan leaderboard.");
+  }
+  if (!friendsBoard.some((entry) => entry.attempt_id === globalAttempt.id)) {
+    throw new Error("The current user's attempt was missing from the Friends leaderboard.");
+  }
+  if (!friendsBoard.some((entry) => entry.attempt_id === clanAttempt.id)) {
+    throw new Error("An accepted friend's attempt was missing from the Friends leaderboard.");
+  }
+
+  const declinedFriendshipId = await request(`${baseUrl}/rest/v1/rpc/request_friend`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ target_username: outsider.username }),
+  });
+  await request(`${baseUrl}/rest/v1/rpc/respond_friend_request`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: JSON.stringify({ friendship: declinedFriendshipId, accept: false }),
+  });
+  const declinedRelationships = await request(`${baseUrl}/rest/v1/rpc/list_friendships`, {
+    method: "POST",
+    headers: owner.headers,
+    body: "{}",
+  });
+  if (declinedRelationships.some((item) => item.friendship_id === declinedFriendshipId)) {
+    throw new Error("A declined friend request was not removed.");
   }
 
   const guestRequests = await request(`${baseUrl}/rest/v1/rpc/request_guest_access`, {
@@ -275,6 +485,8 @@ try {
     throw new Error("An authorized guest was missing from the timer player list.");
   }
 
+  await requestAndAcceptFriend(observer, outsider);
+
   const correctionAttempt = await request(`${baseUrl}/rest/v1/rpc/start_attempt`, {
     method: "POST",
     headers: owner.headers,
@@ -299,6 +511,11 @@ try {
     method: "POST",
     headers: owner.headers,
     body: JSON.stringify({ attempt: correctionAttempt.id }),
+  });
+  await request(`${baseUrl}/rest/v1/rpc/review_attempt`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: JSON.stringify({ attempt: correctionAttempt.id, approve: true }),
   });
 
   await request(`${baseUrl}/rest/v1/rpc/revoke_guest_access`, {
@@ -382,6 +599,15 @@ try {
       }),
     );
   }
+  if (evidencePaths.length) {
+    await cleanup(() =>
+      request(`${baseUrl}/storage/v1/object/attempt-videos`, {
+        method: "DELETE",
+        headers: serviceHeaders,
+        body: JSON.stringify({ prefixes: evidencePaths }),
+      }),
+    );
+  }
   if (clanId) {
     await cleanup(() =>
       request(`${baseUrl}/rest/v1/clans?id=eq.${clanId}`, {
@@ -423,4 +649,4 @@ try {
   }
 }
 
-console.log("Smoke test passed: app, Auth, scoped timers, guests, clans, RLS, and Storage.");
+console.log("Smoke test passed: app, Auth, scoped timers, friends, reviews, guests, clans, RLS, and Storage.");

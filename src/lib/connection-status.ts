@@ -6,6 +6,7 @@ let online = true;
 let monitoring = false;
 let interval: number | undefined;
 let controller: AbortController | undefined;
+let checkRevision = 0;
 const listeners = new Set<() => void>();
 
 function publish(nextOnline: boolean) {
@@ -15,25 +16,29 @@ function publish(nextOnline: boolean) {
 }
 
 async function checkConnection() {
+  const revision = ++checkRevision;
   if (!navigator.onLine) {
+    controller?.abort();
     publish(false);
     return;
   }
 
   controller?.abort();
-  controller = new AbortController();
-  const timeout = window.setTimeout(() => controller?.abort(), 4_000);
+  const activeController = new AbortController();
+  controller = activeController;
+  const timeout = window.setTimeout(() => activeController.abort(), 4_000);
   try {
     const response = await fetch("/api/health", {
       method: "HEAD",
       cache: "no-store",
-      signal: controller.signal,
+      signal: activeController.signal,
     });
-    publish(response.ok);
+    if (revision === checkRevision) publish(response.ok);
   } catch {
-    publish(false);
+    if (revision === checkRevision) publish(false);
   } finally {
     window.clearTimeout(timeout);
+    if (controller === activeController) controller = undefined;
   }
 }
 
@@ -54,7 +59,9 @@ function startMonitoring() {
 
   stopMonitoring = () => {
     monitoring = false;
+    checkRevision += 1;
     controller?.abort();
+    controller = undefined;
     window.removeEventListener("online", checkWhenVisible);
     window.removeEventListener("offline", markOffline);
     window.removeEventListener("pageshow", checkWhenVisible);

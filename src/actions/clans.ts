@@ -32,8 +32,8 @@ export async function joinClanAction(
 ): Promise<FormState> {
   await requireProfile();
   try {
-    const inviteCode = formString(formData, "inviteCode").trim().toLowerCase();
-    if (!/^[0-9a-f]{24}$/.test(inviteCode)) return { error: "Koden skal være 24 tegn." };
+    const inviteCode = formString(formData, "inviteCode").trim();
+    if (!/^\d{6}$/.test(inviteCode)) return { error: "Koden skal være seks cifre." };
     const supabase = await createSupabaseServerClient();
     const { data, error } = await supabase.rpc("join_clan", { invite_code: inviteCode });
     if (error) throw error;
@@ -82,6 +82,63 @@ export async function removeClanMemberAction(clanId: string, userId: string) {
 
 export async function transferClanAction(clanId: string, userId: string) {
   return clanRpc("transfer_clan", { clan: clanId, new_owner: userId });
+}
+
+export async function addFriendToClanAction(clanId: string, friendId: string) {
+  return clanRpc("add_friend_to_clan", { clan: clanId, friend: friendId });
+}
+
+export async function updateClanAction(
+  clanId: string,
+  _previousState: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  await requireProfile();
+  const file = formData.get("image");
+  let uploadedPath: string | undefined;
+
+  try {
+    const id = uuidSchema.parse(clanId);
+    const name = clanNameSchema.parse(formString(formData, "name"));
+    const currentImagePath = formString(formData, "currentImagePath") || null;
+    if (file instanceof File && file.size > 0 && !file.type.startsWith("image/")) {
+      return { error: "Filen skal være et billede." };
+    }
+
+    const supabase = await createSupabaseServerClient();
+    let imagePath = currentImagePath;
+    if (file instanceof File && file.size > 0) {
+      uploadedPath = `${id}/image-${Date.now()}`;
+      const { error: uploadError } = await supabase.storage
+        .from("clan-images")
+        .upload(uploadedPath, file, { contentType: file.type, upsert: false });
+      if (uploadError) return { error: "Billedet kunne ikke uploades." };
+      imagePath = uploadedPath;
+    }
+
+    const { error } = await supabase.rpc("update_clan_details", {
+      clan: id,
+      name,
+      image_path: imagePath,
+    });
+    if (error) throw error;
+
+    if (uploadedPath && currentImagePath) {
+      await supabase.storage.from("clan-images").remove([currentImagePath]);
+    }
+
+    revalidatePath("/klaner");
+    revalidatePath(`/klaner/${id}`);
+    revalidatePath("/rangliste");
+    revalidatePath("/timer");
+    return { success: "Klanen er opdateret." };
+  } catch (error) {
+    if (uploadedPath) {
+      const supabase = await createSupabaseServerClient();
+      await supabase.storage.from("clan-images").remove([uploadedPath]);
+    }
+    return { error: errorMessage(error, "Klanen kunne ikke opdateres.") };
+  }
 }
 
 export async function deleteClanAction(clanId: string): Promise<ActionResult> {

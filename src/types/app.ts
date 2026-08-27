@@ -2,6 +2,7 @@ export type ProfileRole = "user" | "admin";
 export type AttemptStatus =
   | "running"
   | "awaiting_confirmation"
+  | "pending_review"
   | "approved"
   | "declined"
   | "invalidated";
@@ -21,6 +22,10 @@ export type Category = {
   icon_key: string;
   accent_color: string;
   description: string;
+  image_path: string | null;
+  guide_text: string;
+  guide_video_path: string | null;
+  demo_video_path: string | null;
   sort_order: number;
   is_active: boolean;
 };
@@ -36,6 +41,11 @@ export type Attempt = {
   elapsed_ms: number | null;
   status: AttemptStatus;
   confirmed_at: string | null;
+  submitted_for_review_at?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  evidence_video_path?: string | null;
+  review_note?: string | null;
   invalidated_reason?: string | null;
 };
 
@@ -51,11 +61,32 @@ export type LeaderboardEntry = {
   avatar_path: string | null;
   elapsed_ms: number;
   attempt_id: string;
+  status: "approved" | "pending_review";
+  reviewer_username: string | null;
+};
+
+export type PeerReviewAttempt = {
+  attempt_id: string;
+  user_id: string;
+  username: string;
+  avatar_path: string | null;
+  category_id: string;
+  category_name: string;
+  category_icon_key: string;
+  category_accent_color: string;
+  clan_id: string | null;
+  clan_name: string | null;
+  elapsed_ms: number;
+  stopped_at: string;
+  submitted_for_review_at: string;
+  evidence_video_path: string | null;
+  evidence_video_url?: string | null;
 };
 
 export type Clan = {
   id: string;
   name: string;
+  image_path: string | null;
   invite_code: string;
   created_by: string;
   created_at: string;
@@ -86,6 +117,15 @@ export type GuestAccess = {
   username: string;
   avatar_path: string | null;
   granted_at: string;
+};
+
+export type Friendship = {
+  friendship_id: string;
+  other_user_id: string;
+  username: string;
+  avatar_path: string | null;
+  direction: "friend" | "incoming" | "outgoing";
+  created_at: string;
 };
 
 export type ActionResult<T = undefined> =

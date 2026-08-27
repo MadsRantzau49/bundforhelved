@@ -9,6 +9,7 @@ function shouldUseSecureCookies() {
 }
 
 export async function proxy(request: NextRequest) {
+  if (request.nextUrl.pathname === "/api/health") return NextResponse.next();
   if (!isSupabaseConfigured()) return NextResponse.next();
 
   let response = NextResponse.next({ request });

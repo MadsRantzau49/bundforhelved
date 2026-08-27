@@ -19,6 +19,9 @@ async function attemptRpc(
     if (functionName === "confirm_attempt") {
       revalidatePath("/rangliste");
       revalidatePath("/profil");
+      revalidatePath("/peer-review");
+      revalidatePath("/venner");
+      revalidatePath("/admin");
     }
     return { ok: true, data: data as Attempt };
   } catch (error) {
@@ -91,5 +94,58 @@ export async function reassignAttempt(attemptId: string, playerId: string): Prom
     return { ok: true, data: data as Attempt };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Spilleren kunne ikke ændres.") };
+  }
+}
+
+export async function changeAttemptScope(
+  attemptId: string,
+  clanId: string | null,
+): Promise<ActionResult<Attempt>> {
+  try {
+    const attempt = uuidSchema.parse(attemptId);
+    const clan = clanId ? uuidSchema.parse(clanId) : null;
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.rpc("change_attempt_scope", { attempt, clan });
+    if (error) throw error;
+    revalidatePath("/timer");
+    return { ok: true, data: data as Attempt };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Ranglisten kunne ikke ændres.") };
+  }
+}
+
+const evidenceExtensions: Record<string, string> = {
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+};
+
+export async function uploadAttemptEvidence(
+  attemptId: string,
+  formData: FormData,
+): Promise<ActionResult<Attempt>> {
+  const file = formData.get("video");
+  if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Videoen er tom." };
+  if (file.size > 45 * 1024 * 1024) return { ok: false, error: "Videoen må højst fylde 45 MB." };
+  const extension = evidenceExtensions[file.type];
+  if (!extension) return { ok: false, error: "Videoformatet understøttes ikke." };
+
+  try {
+    const attempt = uuidSchema.parse(attemptId);
+    const path = `${attempt}/evidence-${Date.now()}.${extension}`;
+    const supabase = await createSupabaseServerClient();
+    const { error: uploadError } = await supabase.storage.from("attempt-videos").upload(path, file, {
+      contentType: file.type,
+      upsert: false,
+    });
+    if (uploadError) throw uploadError;
+    const { data, error } = await supabase.rpc("set_attempt_evidence", { attempt, path });
+    if (error) {
+      await supabase.storage.from("attempt-videos").remove([path]);
+      throw error;
+    }
+    return { ok: true, data: data as Attempt };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Videoen kunne ikke gemmes.") };
   }
 }
