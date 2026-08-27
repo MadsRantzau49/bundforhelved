@@ -30,3 +30,8 @@ export function avatarUrl(path: string | null) {
   if (!path) return null;
   return `/api/avatars/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
+
+export function clanImageUrl(path: string | null) {
+  if (!path) return null;
+  return `/api/clan-images/${path.split("/").map(encodeURIComponent).join("/")}`;
+}

@@ -11,27 +11,44 @@ export const metadata: Metadata = { title: "Administration" };
 export default async function AdminPage() {
   const admin = await requireAdmin();
   const supabase = await createSupabaseServerClient();
-  const [categoriesResult, usersResult, attemptsResult] = await Promise.all([
+  async function getAllStoppedAttempts() {
+    const rows: unknown[] = [];
+    for (let from = 0; ; from += 1000) {
+      const result = await supabase
+        .from("attempts")
+        .select("id, user_id, recorded_by, category_id, clan_id, elapsed_ms, stopped_at, confirmed_at, submitted_for_review_at, reviewed_at, status, invalidated_reason, profiles!attempts_user_id_fkey(id, username, avatar_path), recorder:profiles!attempts_recorded_by_fkey(id, username), categories!inner(id, name, icon_key, accent_color), clans(id, name)")
+        .neq("status", "running")
+        .order("stopped_at", { ascending: false })
+        .range(from, from + 999);
+      if (result.error) return { data: null, error: result.error };
+      rows.push(...(result.data ?? []));
+      if ((result.data?.length ?? 0) < 1000) return { data: rows, error: null };
+    }
+  }
+  const [categoriesResult, usersResult, attemptsResult, clansResult] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
       .order("sort_order"),
     supabase
       .from("profiles")
       .select("id, username, avatar_path, role, created_at")
-      .order("created_at", { ascending: false })
-      .limit(100),
+      .order("created_at", { ascending: false }),
+    getAllStoppedAttempts(),
     supabase
-      .from("attempts")
-      .select("id, elapsed_ms, confirmed_at, status, invalidated_reason, profiles!attempts_user_id_fkey(id, username, avatar_path), categories!inner(id, name, icon_key, accent_color)")
-      .in("status", ["approved", "invalidated"])
-      .order("confirmed_at", { ascending: false })
-      .limit(100),
+      .from("clans")
+      .select("id, name, clan_members!clan_members_clan_id_fkey(user_id)")
+      .order("name"),
   ]);
+
+  if (categoriesResult.error || usersResult.error || attemptsResult.error || clansResult.error) {
+    throw new Error("Administrationsdata kunne ikke hentes.");
+  }
 
   const categories = (categoriesResult.data ?? []) as Category[];
   const users = (usersResult.data ?? []) as Profile[];
   const attempts = (attemptsResult.data ?? []) as unknown as Parameters<typeof AdminDashboard>[0]["attempts"];
+  const clans = (clansResult.data ?? []) as unknown as Parameters<typeof AdminDashboard>[0]["clans"];
 
   return (
     <div className="page page--admin">
@@ -42,11 +59,11 @@ export default async function AdminPage() {
         action={<span className="header-admin"><ShieldCheck aria-hidden="true" /></span>}
       />
       <div className="admin-summary">
-        <div><span><TimerReset aria-hidden="true" /></span><strong>{attempts.length}</strong><small>seneste tider</small></div>
+        <div><span><TimerReset aria-hidden="true" /></span><strong>{attempts.length}</strong><small>alle stoppede tider</small></div>
         <div><span><UsersRound aria-hidden="true" /></span><strong>{users.length}</strong><small>brugere</small></div>
         <div><span><ShieldCheck aria-hidden="true" /></span><strong>{categories.filter((category) => category.is_active).length}</strong><small>aktive kategorier</small></div>
       </div>
-      <AdminDashboard categories={categories} users={users} attempts={attempts} currentUserId={admin.id} />
+      <AdminDashboard categories={categories} users={users} attempts={attempts} clans={clans} currentUserId={admin.id} />
     </div>
   );
 }

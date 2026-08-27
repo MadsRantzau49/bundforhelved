@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CircleUserRound, TimerReset, Trophy, UsersRound } from "lucide-react";
+import { BookOpenText, CircleUserRound, Handshake, TimerReset, Trophy, UsersRound } from "lucide-react";
 import clsx from "clsx";
 import { useConnectionStatus } from "@/lib/connection-status";
 
@@ -10,6 +10,8 @@ const links = [
   { href: "/timer", label: "Timer", icon: TimerReset },
   { href: "/rangliste", label: "Toppen", icon: Trophy },
   { href: "/klaner", label: "Klaner", icon: UsersRound },
+  { href: "/venner", label: "Venner", icon: Handshake },
+  { href: "/guide", label: "Guide", icon: BookOpenText },
   { href: "/profil", label: "Mig", icon: CircleUserRound },
 ];
 

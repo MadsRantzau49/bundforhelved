@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Crown, Globe2, Medal, Sparkles, Trophy, UsersRound } from "lucide-react";
+import { BadgeCheck, Crown, Globe2, Handshake, Hourglass, Medal, Sparkles, Trophy, UsersRound } from "lucide-react";
 import clsx from "clsx";
 import { Avatar } from "@/components/avatar";
 import { CategoryIcon } from "@/components/category-icon";
@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: "Rangliste" };
 export default async function LeaderboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ kategori?: string; klan?: string; ny?: string }>;
+  searchParams: Promise<{ kategori?: string; klan?: string; venner?: string; ny?: string }>;
 }) {
   const params = await searchParams;
   const profile = await requireProfile();
@@ -24,12 +24,12 @@ export default async function LeaderboardPage({
   const [categoriesResult, membershipsResult] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
       .eq("is_active", true)
       .order("sort_order"),
     supabase
       .from("clan_members")
-      .select("clan_id, user_id, role, joined_at, clans!clan_members_clan_id_fkey!inner(id, name, created_by, created_at)")
+      .select("clan_id, user_id, role, joined_at, clans!clan_members_clan_id_fkey!inner(id, name, image_path, created_by, created_at)")
       .eq("user_id", profile.id)
       .order("joined_at"),
   ]);
@@ -46,22 +46,27 @@ export default async function LeaderboardPage({
   const category = categories.find((item) => item.id === params.kategori) ?? categories[0];
   const selectedMembership = memberships.find((item) => item.clan_id === params.klan);
   if (params.klan && !selectedMembership) notFound();
+  if (params.venner && params.venner !== "1") notFound();
+  if (params.venner === "1" && params.klan) notFound();
   const clanId = selectedMembership?.clan_id ?? null;
+  const friendsOnly = params.venner === "1";
 
   let entries: LeaderboardEntry[] = [];
   if (category) {
     const { data, error } = await supabase.rpc("get_leaderboard", {
       category: category.id,
       clan: clanId,
+      friends_only: friendsOnly,
     });
     if (error) throw new Error("Ranglisten kunne ikke hentes.");
     entries = (data ?? []) as LeaderboardEntry[];
   }
 
   const currentEntry = entries.find((entry) => entry.user_id === profile.id);
-  const hrefFor = (categoryId: string, selectedClan = clanId) => {
+  const hrefFor = (categoryId: string, selectedClan = clanId, selectedFriends = friendsOnly) => {
     const query = new URLSearchParams({ kategori: categoryId });
     if (selectedClan) query.set("klan", selectedClan);
+    if (selectedFriends) query.set("venner", "1");
     return `/rangliste?${query.toString()}`;
   };
 
@@ -70,22 +75,25 @@ export default async function LeaderboardPage({
       <PageHeader
         eyebrow="De hurtigste hænder"
         title="Toppen"
-        description="Kun den bedste godkendte tid fra hver spiller på den valgte tavle tæller."
+        description="Se de bedste tider globalt, blandt dine venner eller i dine klaner. Bekræftede tider er peer reviewet."
         action={<span className="header-trophy"><Trophy aria-hidden="true" /></span>}
       />
 
       {params.ny === "1" && (
-        <div className="success-banner"><Sparkles aria-hidden="true" /> Tiden er godkendt og med på tavlen.</div>
+        <div className="success-banner"><Sparkles aria-hidden="true" /> Tiden er synlig som ubekræftet, indtil en anden bruger peer reviewer den.</div>
       )}
 
       <div className="scope-tabs" aria-label="Vælg rangliste">
-        <Link href={hrefFor(category?.id ?? "", null)} className={clsx(!clanId && "is-active")} aria-current={!clanId ? "page" : undefined}>
+        <Link href={hrefFor(category?.id ?? "", null, false)} className={clsx(!clanId && !friendsOnly && "is-active")} aria-current={!clanId && !friendsOnly ? "page" : undefined}>
           <Globe2 aria-hidden="true" /> Global
+        </Link>
+        <Link href={hrefFor(category?.id ?? "", null, true)} className={clsx(friendsOnly && "is-active")} aria-current={friendsOnly ? "page" : undefined}>
+          <Handshake aria-hidden="true" /> Venner
         </Link>
         {memberships.map((membership) => (
           <Link
             key={membership.clan_id}
-            href={hrefFor(category?.id ?? "", membership.clan_id)}
+            href={hrefFor(category?.id ?? "", membership.clan_id, false)}
             className={clsx(clanId === membership.clan_id && "is-active")}
             aria-current={clanId === membership.clan_id ? "page" : undefined}
           >
@@ -113,7 +121,7 @@ export default async function LeaderboardPage({
           <span className="empty-state__mark"><Trophy aria-hidden="true" /></span>
           <h2>Tavlen venter</h2>
           <p>Den første godkendte tid tager automatisk førstepladsen.</p>
-          <Link href={clanId ? `/timer?klan=${clanId}` : "/timer"} className="button button--primary">Sæt den første tid</Link>
+           <Link href={clanId ? `/timer?klan=${clanId}` : "/timer"} className="button button--primary">Sæt den første tid</Link>
         </section>
       ) : (
         <>
@@ -127,7 +135,8 @@ export default async function LeaderboardPage({
                   <Avatar username={entry.username} path={entry.avatar_path} size={place === 1 ? "hero" : "large"} rank={place} />
                   <span className="podium__rank">{place}</span>
                   <strong>@{entry.username}</strong>
-                  <b>{formatTime(entry.elapsed_ms)}<small>s</small></b>
+                   <b>{formatTime(entry.elapsed_ms)}<small>s</small></b>
+                  <span className={entry.status === "approved" ? "leaderboard-status is-confirmed" : "leaderboard-status is-pending"}>{entry.status === "approved" ? <><BadgeCheck aria-hidden="true" /> Bekræftet{entry.reviewer_username && ` af @${entry.reviewer_username}`}</> : <><Hourglass aria-hidden="true" /> Ubekræftet</>}</span>
                   <div className="podium__block"><span>{place}</span></div>
                 </article>
               );
@@ -151,7 +160,7 @@ export default async function LeaderboardPage({
                   <Avatar username={entry.username} path={entry.avatar_path} size="medium" />
                   <div className="leaderboard-row__person">
                     <strong>@{entry.username}</strong>
-                    <small>{entry.user_id === profile.id ? "Det er dig" : clanId ? "Klanmedlem" : "Global spiller"}</small>
+                    <small>{entry.status === "approved" ? <><BadgeCheck aria-hidden="true" /> Bekræftet{entry.reviewer_username && ` af @${entry.reviewer_username}`}</> : <><Hourglass aria-hidden="true" /> Ubekræftet · afventer peer review</>}</small>
                   </div>
                   <b>{formatTime(entry.elapsed_ms)}<small>s</small></b>
                 </article>

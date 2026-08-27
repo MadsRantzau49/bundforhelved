@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   BarChart3,
+  Ban,
   CalendarDays,
+  CheckCircle2,
   Clock3,
+  Hourglass,
   LogOut,
   ShieldCheck,
   TimerReset,
@@ -21,12 +24,16 @@ import type { GuestAccess } from "@/types/app";
 
 export const metadata: Metadata = { title: "Profil" };
 
-type ApprovedAttempt = {
+type ProfileAttempt = {
   id: string;
   category_id: string;
   clan_id: string | null;
   elapsed_ms: number;
-  confirmed_at: string;
+  confirmed_at: string | null;
+  submitted_for_review_at: string | null;
+  reviewed_by: string | null;
+  status: "approved" | "pending_review" | "invalidated";
+  invalidated_reason: string | null;
   created_at: string;
   categories: {
     id: string;
@@ -34,6 +41,7 @@ type ApprovedAttempt = {
     icon_key: string;
     accent_color: string;
   };
+  reviewer: { username: string } | null;
 };
 
 type Membership = {
@@ -47,10 +55,10 @@ export default async function ProfilePage() {
   const [attemptsResult, membershipsResult, accessResult] = await Promise.all([
     supabase
       .from("attempts")
-      .select("id, category_id, clan_id, elapsed_ms, confirmed_at, created_at, categories!inner(id, name, icon_key, accent_color)")
+      .select("id, category_id, clan_id, elapsed_ms, confirmed_at, submitted_for_review_at, reviewed_by, status, invalidated_reason, created_at, categories!inner(id, name, icon_key, accent_color), reviewer:profiles!attempts_reviewed_by_fkey(username)")
       .eq("user_id", profile.id)
-      .eq("status", "approved")
-      .order("confirmed_at", { ascending: false })
+      .in("status", ["approved", "pending_review", "invalidated"])
+      .order("created_at", { ascending: false })
       .order("id", { ascending: false }),
     supabase
       .from("clan_members")
@@ -63,20 +71,21 @@ export default async function ProfilePage() {
     throw new Error("Profildata kunne ikke hentes.");
   }
 
-  const attempts = (attemptsResult.data ?? []) as unknown as ApprovedAttempt[];
+  const attempts = (attemptsResult.data ?? []) as unknown as ProfileAttempt[];
+  const approvedAttempts = attempts.filter((attempt) => attempt.status === "approved");
   const memberships = (membershipsResult.data ?? []) as unknown as Membership[];
   const guestAccess = (accessResult.data ?? []) as GuestAccess[];
   const clanNames = new Map(memberships.map((membership) => [membership.clan_id, membership.clans.name]));
-  const bestByCategory = new Map<string, ApprovedAttempt>();
+  const bestByCategory = new Map<string, ProfileAttempt>();
   const categoryStats = new Map<string, {
-    category: ApprovedAttempt["categories"];
+    category: ProfileAttempt["categories"];
     count: number;
     total: number;
     best: number;
     latest: string;
   }>();
 
-  for (const attempt of attempts) {
+  for (const attempt of approvedAttempts) {
     const currentBest = bestByCategory.get(attempt.category_id);
     if (!currentBest || attempt.elapsed_ms < currentBest.elapsed_ms) {
       bestByCategory.set(attempt.category_id, attempt);
@@ -93,7 +102,7 @@ export default async function ProfilePage() {
         count: 1,
         total: attempt.elapsed_ms,
         best: attempt.elapsed_ms,
-        latest: attempt.confirmed_at,
+        latest: attempt.confirmed_at ?? attempt.created_at,
       });
     }
   }
@@ -104,8 +113,8 @@ export default async function ProfilePage() {
   const stats = [...categoryStats.values()].sort(
     (left, right) => left.category.name.localeCompare(right.category.name, "da"),
   );
-  const activeDays = new Set(attempts.map((attempt) => formatDate(attempt.confirmed_at))).size;
-  const scopeName = (attempt: ApprovedAttempt) => attempt.clan_id
+  const activeDays = new Set(approvedAttempts.map((attempt) => formatDate(attempt.confirmed_at ?? attempt.created_at))).size;
+  const scopeName = (attempt: ProfileAttempt) => attempt.clan_id
     ? clanNames.get(attempt.clan_id) ?? "Klan"
     : "Global";
 
@@ -122,7 +131,7 @@ export default async function ProfilePage() {
 
       <section className="stats-strip">
         <div><Trophy aria-hidden="true" /><strong>{bests.length}</strong><span>personlige rekorder</span></div>
-        <div><TimerReset aria-hidden="true" /><strong>{attempts.length}</strong><span>godkendte tider</span></div>
+        <div><TimerReset aria-hidden="true" /><strong>{approvedAttempts.length}</strong><span>bekræftede tider</span></div>
         <div><CalendarDays aria-hidden="true" /><strong>{activeDays}</strong><span>aktive dage</span></div>
       </section>
 
@@ -138,7 +147,7 @@ export default async function ProfilePage() {
                 <CategoryIcon iconKey={attempt.categories.icon_key} />
                 <span>{attempt.categories.name} · {scopeName(attempt)}</span>
                 <strong>{formatTime(attempt.elapsed_ms)}<small>s</small></strong>
-                <small>{formatDate(attempt.confirmed_at)}</small>
+                <small>{formatDate(attempt.confirmed_at ?? attempt.created_at)}</small>
               </article>
             ))}
           </div>
@@ -186,7 +195,10 @@ export default async function ProfilePage() {
                 </span>
                 <div>
                   <strong>{attempt.categories.name}</strong>
-                  <small><Clock3 aria-hidden="true" /> {formatDate(attempt.confirmed_at)} · {scopeName(attempt)}</small>
+                  <small><Clock3 aria-hidden="true" /> {formatDate(attempt.confirmed_at ?? attempt.submitted_for_review_at ?? attempt.created_at)} · {scopeName(attempt)}</small>
+                  <span className={`profile-attempt-status profile-attempt-status--${attempt.status}`}>
+                    {attempt.status === "approved" ? <><CheckCircle2 aria-hidden="true" /> Bekræftet{attempt.reviewer && ` af @${attempt.reviewer.username}`}</> : attempt.status === "pending_review" ? <><Hourglass aria-hidden="true" /> Afventer en ven</> : <><Ban aria-hidden="true" /> Ugyldig</>}
+                  </span>
                 </div>
                 <b>{formatTime(attempt.elapsed_ms)}<small>s</small></b>
               </article>

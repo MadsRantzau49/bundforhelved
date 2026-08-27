@@ -11,6 +11,16 @@ import type { ActionResult, FormState } from "@/types/app";
 
 const colorPattern = /^#[0-9A-Fa-f]{6}$/;
 const iconPattern = /^[a-z0-9][a-z0-9_-]{0,49}$/;
+const maxMediaBytes = 45 * 1024 * 1024;
+const mediaExtensions: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+};
 
 export async function createCategoryAction(
   _previousState: FormState,
@@ -58,6 +68,134 @@ export async function toggleCategoryAction(id: string, active: boolean): Promise
     return { ok: true, data: undefined };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Kategorien kunne ikke opdateres.") };
+  }
+}
+
+export async function updateCategoryAction(formData: FormData): Promise<ActionResult> {
+  await requireAdmin();
+  const id = uuidSchema.safeParse(formString(formData, "id"));
+  const name = formString(formData, "name").trim();
+  const iconKey = formString(formData, "iconKey").trim();
+  const accentColor = formString(formData, "accentColor").trim();
+  const description = formString(formData, "description").trim();
+  const guideText = formString(formData, "guideText").trim();
+  if (!id.success) return { ok: false, error: "Kategorien er ugyldig." };
+  if (!name || name.length > 80) return { ok: false, error: "Skriv et kategorinavn på højst 80 tegn." };
+  if (!iconPattern.test(iconKey)) return { ok: false, error: "Vælg et gyldigt ikon." };
+  if (!colorPattern.test(accentColor)) return { ok: false, error: "Vælg en gyldig farve." };
+  if (description.length > 160) return { ok: false, error: "Beskrivelsen må højst være 160 tegn." };
+  if (guideText.length > 50_000) return { ok: false, error: "Guideteksten er for lang." };
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: current, error: readError } = await supabase
+      .from("categories")
+      .select("image_path, guide_video_path, demo_video_path")
+      .eq("id", id.data)
+      .single();
+    if (readError || !current) throw readError ?? new Error("Category not found");
+
+    const nextPaths = {
+      image_path: formData.get("removeImage") === "on" ? null : current.image_path,
+      guide_video_path: formData.get("removeGuideVideo") === "on" ? null : current.guide_video_path,
+      demo_video_path: formData.get("removeDemoVideo") === "on" ? null : current.demo_video_path,
+    };
+    const uploaded: string[] = [];
+    const uploads = [
+      ["image", "image", "image_path"],
+      ["guideVideo", "guide", "guide_video_path"],
+      ["demoVideo", "demo", "demo_video_path"],
+    ] as const;
+
+    for (const [field, kind, column] of uploads) {
+      const file = formData.get(field);
+      if (!(file instanceof File) || file.size === 0) continue;
+      const extension = mediaExtensions[file.type];
+      const expectedKind = kind === "image" ? "image/" : "video/";
+      if (!extension || !file.type.startsWith(expectedKind)) {
+        await supabase.storage.from("category-media").remove(uploaded);
+        return { ok: false, error: `${kind === "image" ? "Billedet" : "Videoen"} har et format, der ikke understøttes.` };
+      }
+      if (file.size > maxMediaBytes) {
+        await supabase.storage.from("category-media").remove(uploaded);
+        return { ok: false, error: "Hver mediefil må højst fylde 45 MB." };
+      }
+      const path = `${id.data}/${kind}-${Date.now()}.${extension}`;
+      const { error: uploadError } = await supabase.storage.from("category-media").upload(path, file, {
+        contentType: file.type,
+        upsert: false,
+      });
+      if (uploadError) {
+        await supabase.storage.from("category-media").remove(uploaded);
+        throw uploadError;
+      }
+      uploaded.push(path);
+      nextPaths[column] = path;
+    }
+
+    const { error } = await supabase.from("categories").update({
+      name,
+      icon_key: iconKey,
+      accent_color: accentColor,
+      description,
+      guide_text: guideText,
+      ...nextPaths,
+    }).eq("id", id.data).select("id").single();
+    if (error) {
+      await supabase.storage.from("category-media").remove(uploaded);
+      throw error;
+    }
+
+    const replaced = [current.image_path, current.guide_video_path, current.demo_video_path]
+      .filter((path): path is string => Boolean(path) && !Object.values(nextPaths).includes(path));
+    if (replaced.length) await supabase.storage.from("category-media").remove(replaced);
+    revalidatePath("/admin");
+    revalidatePath("/timer");
+    revalidatePath("/guide");
+    revalidatePath("/rangliste");
+    revalidatePath("/profil");
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Kategorien kunne ikke gemmes.") };
+  }
+}
+
+export type AdminAttemptUpdateInput = {
+  attemptId: string;
+  playerId: string;
+  categoryId: string;
+  clanId: string | null;
+  elapsedMs: number;
+  valid: boolean | null;
+  reason: string;
+};
+
+export async function adminUpdateAttemptAction(input: AdminAttemptUpdateInput): Promise<ActionResult> {
+  await requireAdmin();
+  if (!Number.isSafeInteger(input.elapsedMs) || input.elapsedMs < 0) {
+    return { ok: false, error: "Tiden skal være et positivt antal millisekunder." };
+  }
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase.rpc("admin_update_attempt", {
+      attempt: uuidSchema.parse(input.attemptId),
+      player: uuidSchema.parse(input.playerId),
+      category: uuidSchema.parse(input.categoryId),
+      clan: input.clanId ? uuidSchema.parse(input.clanId) : null,
+      elapsed: input.elapsedMs,
+      valid: input.valid,
+      reason: input.reason.trim(),
+    });
+    if (error) throw error;
+    revalidatePath("/admin");
+    revalidatePath("/timer");
+    revalidatePath("/rangliste");
+    revalidatePath("/profil");
+    revalidatePath("/peer-review");
+    revalidatePath("/venner");
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Tiden kunne ikke opdateres.") };
   }
 }
 

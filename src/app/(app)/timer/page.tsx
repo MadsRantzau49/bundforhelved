@@ -18,13 +18,13 @@ export default async function TimerPage({
   const [categoriesResult, attemptResult, playersResult] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
       .eq("is_active", true)
       .order("sort_order")
       .order("name"),
     supabase
       .from("attempts")
-      .select("id, user_id, recorded_by, category_id, clan_id, started_at, stopped_at, elapsed_ms, status, confirmed_at")
+      .select("id, user_id, recorded_by, category_id, clan_id, started_at, stopped_at, elapsed_ms, status, confirmed_at, submitted_for_review_at, evidence_video_path")
       .eq("recorded_by", profile.id)
       .in("status", ["running", "awaiting_confirmation"])
       .limit(1)
@@ -53,7 +53,7 @@ export default async function TimerPage({
   if (activeAttempt && !categories.some((category) => category.id === activeAttempt.category_id)) {
     const { data, error } = await supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
       .eq("id", activeAttempt.category_id)
       .maybeSingle();
     if (error) throw new Error("Forsøgets kategori kunne ikke hentes.");
