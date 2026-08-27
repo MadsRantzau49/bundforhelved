@@ -1,6 +1,6 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { confirmAttempt, startAttempt, syncAttemptElapsed } from "@/actions/attempts";
+import { confirmAttempt, declineAttempt, startAttempt, stopAttempt, syncAttemptElapsed } from "@/actions/attempts";
 import { TimerStage } from "@/components/timer-stage";
 import type { Attempt, Category, TimerPlayer } from "@/types/app";
 
@@ -77,6 +77,7 @@ describe("TimerStage", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -97,6 +98,57 @@ describe("TimerStage", () => {
     expect(frame).toBeTypeOf("function");
     act(() => frame?.(350));
     expect(screen.getByLabelText("1.25 sekunder")).toBeInTheDocument();
+  });
+
+  it("stops from the full-screen surface and ignores rapid duplicate taps", async () => {
+    vi.mocked(stopAttempt).mockResolvedValue({
+      ok: true,
+      data: attempt({
+        status: "awaiting_confirmation",
+        stopped_at: "2099-01-01T00:00:02.000Z",
+        elapsed_ms: 2_000,
+      }),
+    });
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={attempt()}
+        attemptCategory={null}
+        initialElapsedMs={1_000}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    const stopSurface = screen.getByRole("button", { name: /stop timeren.*hvor som helst/i });
+    fireEvent.click(stopSurface);
+    fireEvent.click(stopSurface);
+
+    await waitFor(() => expect(stopAttempt).toHaveBeenCalledWith("20000000-0000-4000-8000-000000000001"));
+    expect(stopAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps cancellation in the separate bottom zone", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(declineAttempt).mockResolvedValue({
+      ok: true,
+      data: attempt({ status: "declined", stopped_at: "2099-01-01T00:00:02.000Z", elapsed_ms: 2_000 }),
+    });
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={attempt()}
+        attemptCategory={null}
+        initialElapsedMs={1_000}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Afbryd forsøg" }));
+
+    await waitFor(() => expect(declineAttempt).toHaveBeenCalled());
+    expect(stopAttempt).not.toHaveBeenCalled();
   });
 
   it("opens a large start mode before starting for the selected scope", async () => {

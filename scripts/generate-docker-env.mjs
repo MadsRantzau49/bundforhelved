@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, generateKeyPairSync, randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -29,6 +29,20 @@ function createApiKey(role, secret) {
   return `${header}.${payload}.${signature}`;
 }
 
+function createVapidKeys() {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const key = privateKey.export({ format: "jwk" });
+  if (!key.x || !key.y || !key.d) throw new Error("Could not generate VAPID keys.");
+  return {
+    publicKey: Buffer.concat([
+      Buffer.from([4]),
+      Buffer.from(key.x, "base64url"),
+      Buffer.from(key.y, "base64url"),
+    ]).toString("base64url"),
+    privateKey: key.d,
+  };
+}
+
 function parseEnv(contents) {
   return Object.fromEntries(
     contents
@@ -42,6 +56,7 @@ function parseEnv(contents) {
 }
 
 let values;
+let shouldWrite = false;
 if (existsSync(envPath)) {
   values = parseEnv(await readFile(envPath, "utf8"));
 } else {
@@ -63,6 +78,21 @@ if (existsSync(envPath)) {
     BOOTSTRAP_ADMIN_USERNAME: "admin",
     BOOTSTRAP_ADMIN_PASSWORD: "123",
   };
+  shouldWrite = true;
+}
+
+if (!values.NEXT_PUBLIC_VAPID_PUBLIC_KEY || !values.VAPID_PRIVATE_KEY) {
+  const vapid = createVapidKeys();
+  values.NEXT_PUBLIC_VAPID_PUBLIC_KEY = vapid.publicKey;
+  values.VAPID_PRIVATE_KEY = vapid.privateKey;
+  shouldWrite = true;
+}
+if (!values.VAPID_SUBJECT) {
+  values.VAPID_SUBJECT = "mailto:admin@bundforhelved.local";
+  shouldWrite = true;
+}
+
+if (shouldWrite) {
   const contents = [
     "# Generated local secrets. Do not commit this file.",
     ...Object.entries(values).map(([key, value]) => `${key}=${value}`),
@@ -83,6 +113,9 @@ const required = [
   "ANON_KEY",
   "SERVICE_ROLE_KEY",
   "AUTH_PASSWORD_PEPPER",
+  "NEXT_PUBLIC_VAPID_PUBLIC_KEY",
+  "VAPID_PRIVATE_KEY",
+  "VAPID_SUBJECT",
   "S3_PROTOCOL_ACCESS_KEY_ID",
   "S3_PROTOCOL_ACCESS_KEY_SECRET",
   "BOOTSTRAP_ADMIN_USERNAME",

@@ -2,6 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import {
+  Award,
   ChevronDown,
   FileVideo,
   ImagePlus,
@@ -21,13 +22,16 @@ import {
   resetUserPasswordAction,
   setUserAdminAction,
   toggleCategoryAction,
+  updateAchievementImageAction,
   updateCategoryAction,
 } from "@/actions/admin";
 import { Avatar } from "@/components/avatar";
 import { CategoryVisual } from "@/components/category-visual";
 import { FormMessage, SubmitButton } from "@/components/form-controls";
+import { achievementMediaUrl } from "@/lib/achievement-media";
+import { achievementDefinitions } from "@/lib/achievements";
 import { formatDate, formatTime } from "@/lib/format";
-import type { AttemptStatus, Category, Profile } from "@/types/app";
+import type { AchievementAsset, AttemptStatus, Category, Profile } from "@/types/app";
 
 export type AdminAttempt = {
   id: string;
@@ -157,17 +161,50 @@ function AttemptEditor({
   );
 }
 
+function AchievementImageEditor({
+  achievement,
+  imagePath,
+  pending,
+  run,
+}: {
+  achievement: (typeof achievementDefinitions)[number];
+  imagePath: string | null;
+  pending: boolean;
+  run: (action: () => Promise<{ ok: boolean; error?: string }>, success: string) => void;
+}) {
+  const imageUrl = achievementMediaUrl(imagePath);
+  return (
+    <form
+      className="admin-achievement"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        run(() => updateAchievementImageAction(formData), `${achievement.title} har fået nyt billede.`);
+      }}
+    >
+      <input type="hidden" name="key" value={achievement.key} />
+      <span className="admin-achievement__preview" style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}>{!imageUrl && <Award aria-hidden="true" />}</span>
+      <div><strong>{achievement.title}</strong><small>{achievement.description}</small><em>{achievement.rarity}</em></div>
+      <label className="admin-achievement__upload"><ImagePlus aria-hidden="true" /><span>Vælg billede</span><input name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /></label>
+      {imagePath && <label className="admin-remove-media"><input type="checkbox" name="removeImage" /> Fjern nuværende</label>}
+      <button className="button button--primary" disabled={pending}><Save aria-hidden="true" /> Gem</button>
+    </form>
+  );
+}
+
 export function AdminDashboard({
   categories,
   users,
   attempts,
   clans,
+  achievementAssets,
   currentUserId,
 }: {
   categories: Category[];
   users: Profile[];
   attempts: AdminAttempt[];
   clans: AdminClan[];
+  achievementAssets: AchievementAsset[];
   currentUserId: string;
 }) {
   const [createState, createAction] = useActionState(createCategoryAction, {});
@@ -194,6 +231,7 @@ export function AdminDashboard({
     const haystack = `${attempt.profiles.username} ${attempt.categories.name} ${attempt.clans?.name ?? "global"} ${attempt.id}`.toLowerCase();
     return matchesStatus && (!normalizedQuery || haystack.includes(normalizedQuery));
   });
+  const achievementArtwork = new Map(achievementAssets.map((asset) => [asset.achievement_key, asset.image_path]));
 
   return (
     <div className="admin-dashboard">
@@ -209,6 +247,13 @@ export function AdminDashboard({
           <div className="field admin-create-form__description"><label htmlFor="category-description">Beskrivelse</label><input id="category-description" name="description" maxLength={160} placeholder="50 cl fra fad" /></div>
           <FormMessage {...createState} /><SubmitButton className="button--primary" pendingLabel="Opretter...">Opret kategori</SubmitButton>
         </form>
+      </section>
+
+      <section className="admin-section" id="bedrifter">
+        <div className="admin-section__header"><div><p className="eyebrow">Medaljeværkstedet</p><h2>Billeder til bedrifter</h2><p>Upload et unikt billede til hver bedrift. JPG, PNG, WebP eller GIF, maks. 5 MB.</p></div><span>{achievementAssets.filter((asset) => asset.image_path).length} med billeder</span></div>
+        <div className="admin-achievement-grid">
+          {achievementDefinitions.map((achievement) => <AchievementImageEditor key={achievement.key} achievement={achievement} imagePath={achievementArtwork.get(achievement.key) ?? null} pending={pending} run={run} />)}
+        </div>
       </section>
 
       <section className="admin-section" id="tider">

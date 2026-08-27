@@ -1,12 +1,23 @@
 import Link from "next/link";
-import { ShieldCheck } from "lucide-react";
+import { Settings, ShieldCheck } from "lucide-react";
 import { Avatar } from "@/components/avatar";
 import { BottomNav } from "@/components/bottom-nav";
 import { Brand } from "@/components/brand";
 import { ConnectionStatus } from "@/components/connection-status";
-import type { Profile } from "@/types/app";
+import { NotificationCenter } from "@/components/notification-center";
+import type { Profile, SocialBadges, SocialNotification } from "@/types/app";
 
-export function AppShell({ profile, children }: { profile: Profile; children: React.ReactNode }) {
+export function AppShell({
+  profile,
+  badges,
+  notifications,
+  children,
+}: {
+  profile: Profile;
+  badges: SocialBadges;
+  notifications: SocialNotification[];
+  children: React.ReactNode;
+}) {
   return (
     <div className="app-shell">
       <div className="ambient ambient--one" />
@@ -15,6 +26,14 @@ export function AppShell({ profile, children }: { profile: Profile; children: Re
         <Brand compact />
         <div className="top-bar__actions">
           <ConnectionStatus />
+          <NotificationCenter
+            key={`${badges.notifications}:${notifications[0]?.notification_id ?? "empty"}`}
+            initialNotifications={notifications}
+            initialUnread={badges.notifications}
+          />
+          <Link href="/indstillinger" className="icon-button" aria-label="Åbn indstillinger">
+            <Settings aria-hidden="true" />
+          </Link>
           {profile.role === "admin" && (
             <Link href="/admin" className="icon-button" aria-label="Åbn administration">
               <ShieldCheck aria-hidden="true" />
@@ -26,7 +45,7 @@ export function AppShell({ profile, children }: { profile: Profile; children: Re
         </div>
       </header>
       <main className="app-main">{children}</main>
-      <BottomNav />
+      <BottomNav friendAttentionCount={badges.peer_reviews + badges.friend_requests} />
     </div>
   );
 }

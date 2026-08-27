@@ -5,6 +5,8 @@ import { requireAdmin } from "@/lib/auth/session";
 import { providerPassword } from "@/lib/auth/credentials";
 import { errorMessage } from "@/lib/errors";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { deliverPendingPushNotifications } from "@/lib/notifications/push";
+import { achievementDefinitions } from "@/lib/achievements";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formString, uuidSchema } from "@/lib/validation";
 import type { ActionResult, FormState } from "@/types/app";
@@ -21,6 +23,7 @@ const mediaExtensions: Record<string, string> = {
   "video/webm": "webm",
   "video/quicktime": "mov",
 };
+const achievementKeys = new Set(achievementDefinitions.map((achievement) => achievement.key));
 
 export async function createCategoryAction(
   _previousState: FormState,
@@ -160,6 +163,61 @@ export async function updateCategoryAction(formData: FormData): Promise<ActionRe
   }
 }
 
+export async function updateAchievementImageAction(formData: FormData): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const key = formString(formData, "key");
+  if (!achievementKeys.has(key)) return { ok: false, error: "Bedriften er ugyldig." };
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: current, error: readError } = await supabase
+      .from("achievement_assets")
+      .select("image_path")
+      .eq("achievement_key", key)
+      .maybeSingle();
+    if (readError) throw readError;
+
+    const file = formData.get("image");
+    const remove = formData.get("removeImage") === "on";
+    let nextPath = remove ? null : current?.image_path ?? null;
+    let uploadedPath: string | null = null;
+
+    if (file instanceof File && file.size > 0) {
+      const extension = mediaExtensions[file.type];
+      if (!extension || !file.type.startsWith("image/")) return { ok: false, error: "Billedets format understøttes ikke." };
+      if (file.size > 5 * 1024 * 1024) return { ok: false, error: "Billedet må højst fylde 5 MB." };
+      uploadedPath = `${key}/image-${Date.now()}.${extension}`;
+      const { error: uploadError } = await supabase.storage.from("achievement-media").upload(uploadedPath, file, {
+        contentType: file.type,
+        upsert: false,
+      });
+      if (uploadError) throw uploadError;
+      nextPath = uploadedPath;
+    }
+
+    const { error } = await supabase.from("achievement_assets").upsert({
+      achievement_key: key,
+      image_path: nextPath,
+      updated_by: admin.id,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      if (uploadedPath) await supabase.storage.from("achievement-media").remove([uploadedPath]);
+      throw error;
+    }
+
+    if (current?.image_path && current.image_path !== nextPath) {
+      await supabase.storage.from("achievement-media").remove([current.image_path]);
+    }
+    revalidatePath("/admin");
+    revalidatePath("/profil");
+    revalidatePath("/venner");
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Billedet kunne ikke gemmes.") };
+  }
+}
+
 export type AdminAttemptUpdateInput = {
   attemptId: string;
   playerId: string;
@@ -193,6 +251,7 @@ export async function adminUpdateAttemptAction(input: AdminAttemptUpdateInput): 
     revalidatePath("/profil");
     revalidatePath("/peer-review");
     revalidatePath("/venner");
+    if (input.valid === true) await deliverPendingPushNotifications();
     return { ok: true, data: undefined };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Tiden kunne ikke opdateres.") };

@@ -14,6 +14,7 @@ En mobil PWA til servermålt øl-timing, globale ranglister og private klaner. B
 - Profilbilleder, komplet tidshistorik, personlige statistikker og langtidsholdbare login-sessioner.
 - Adminstyring af kategorier, brugere, kode-nulstilling og falske tider.
 - Installerbar PWA med offline-forklaring og sikre cache-regler.
+- Web Push ved venneanmodninger, review-pings og nye top-3-placeringer.
 - Row Level Security på samtlige data og Storage-objekter.
 
 ## Stack
@@ -56,9 +57,10 @@ Forudsætninger: Node.js 22 eller nyere, npm og et Supabase-projekt.
 1. Installer pakkerne med `npm install`.
 2. Kør alle filer i `supabase/migrations` i navnerækkefølge i Supabase SQL Editor. Med Supabase CLI kan migrationerne i stedet køres med `supabase db push`.
 3. Sørg for, at Email provider er aktiv under Authentication > Providers, men deaktivér offentlige nyregistreringer. Appen opretter kun brugere gennem serverens Admin API og bekræfter den interne identitet direkte.
-4. Kopiér værdierne fra `.env.example` til `.env.local`, og udfyld alle fire værdier.
+4. Kopiér værdierne fra `.env.example` til `.env.local`, og udfyld Supabase-værdierne.
 5. Generér `AUTH_PASSWORD_PEPPER` med eksempelvis `openssl rand -base64 32`. Skift ikke værdien senere, da eksisterende adgangskoder ellers ikke længere kan afledes.
-6. Start appen med `npm run dev`.
+6. Generér VAPID-nøgler med `npx web-push generate-vapid-keys`, og sæt begge nøgler samt en gyldig `VAPID_SUBJECT` (`mailto:` eller `https:`). Den private nøgle er server-only.
+7. Start appen med `npm run dev`.
 
 Appen viser en opsætningsside i stedet for at crashe, hvis Supabase-variablerne mangler.
 
@@ -108,4 +110,4 @@ Gæsteadgang giver kun en anden konto lov til at betjene timeren og tilskrive et
 
 Projektet kan deployes direkte på Vercel. Tilføj alle værdier fra `.env.example` som production environment variables. Vercels commit-ID reviderer automatisk PWA-cachen. På andre platforme skal `NEXT_PUBLIC_APP_VERSION` ændres ved en deployment, der skal tvinge en ny cache. Service worker registreres kun i production builds, så cache ikke forstyrrer lokal udvikling.
 
-`SUPABASE_SERVICE_ROLE_KEY` og `AUTH_PASSWORD_PEPPER` er server-only og må aldrig eksponeres med `NEXT_PUBLIC_`.
+`SUPABASE_SERVICE_ROLE_KEY`, `AUTH_PASSWORD_PEPPER` og `VAPID_PRIVATE_KEY` er server-only og må aldrig eksponeres med `NEXT_PUBLIC_`.

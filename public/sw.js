@@ -35,6 +35,39 @@ self.addEventListener("message", (event) => {
   if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
 });
 
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data?.json() || {};
+  } catch {
+    payload = { body: event.data?.text() };
+  }
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(payload.title || "bund forhelved", {
+      body: payload.body || "Du har en ny notifikation.",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      tag: payload.tag,
+      data: { url: payload.url || "/venner" },
+      vibrate: [100, 50, 100],
+    }),
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      clients.forEach((client) => client.postMessage({ type: "SOCIAL_NOTIFICATION" }));
+    }),
+  ]));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const destination = new URL(event.notification.data?.url || "/venner", self.location.origin).href;
+  event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
+    for (const client of clients) {
+      if (new URL(client.url).href === destination) return client.focus();
+    }
+    return self.clients.openWindow(destination);
+  }));
+});
+
 self.addEventListener("fetch", (event) => {
   const request = event.request;
   const url = new URL(request.url);

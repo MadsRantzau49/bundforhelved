@@ -81,6 +81,7 @@ export function TimerStage({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
   const cameraPreviewRef = useRef<HTMLVideoElement | null>(null);
+  const stopRequestedRef = useRef(false);
   const [error, setError] = useState<string>();
   const online = useConnectionStatus();
   const previousOnline = useRef(online);
@@ -396,7 +397,8 @@ export function TimerStage({
   }
 
   function handleStop() {
-    if (!activeAttempt) return;
+    if (!activeAttempt || stopRequestedRef.current) return;
+    stopRequestedRef.current = true;
     setError(undefined);
     startTransition(async () => {
       try {
@@ -424,6 +426,8 @@ export function TimerStage({
       } catch {
         setError("Stoppet kunne ikke bekræftes. Timerstatus opdateres.");
         router.refresh();
+      } finally {
+        stopRequestedRef.current = false;
       }
     });
   }
@@ -623,28 +627,42 @@ export function TimerStage({
   if (activeAttempt?.status === "running" || starting) {
     return (
       <section className="timer-live" style={{ "--accent": category?.accent_color } as React.CSSProperties}>
-        <div className="timer-live__status"><i /> {starting ? "Uret starter" : "Uret kører"}</div>
-        <div className="timer-live__category">
-          <CategoryIcon iconKey={category?.icon_key ?? "cup"} />
-          <span>{category?.name} · {clan ? clan.name : "Global"} · @{player?.username}</span>
+        <button
+          type="button"
+          className="timer-live__stop-surface"
+          onClick={handleStop}
+          disabled={pending || !activeAttempt}
+          aria-label="Stop timeren - tryk hvor som helst på skærmen"
+        />
+        <div className="timer-live__content">
+          <div className="timer-live__status"><i /> {starting ? "Uret starter" : "Uret kører"}</div>
+          <div className="timer-live__category">
+            <CategoryIcon iconKey={category?.icon_key ?? "cup"} />
+            <span>{category?.name} · {clan ? clan.name : "Global"} · @{player?.username}</span>
+          </div>
+          <div className="timer-live__identity">{player && <Avatar username={player.username} path={player.avatar_path} size="medium" />}<div><span>Drikker for</span><strong>@{player?.username} · {clan?.name ?? "Global"}</strong></div></div>
+          {recordEvidence && <div className="timer-camera timer-camera--live"><video ref={attachCameraPreview} autoPlay muted playsInline /><span><Camera aria-hidden="true" /> Video optages</span></div>}
+          <div className="timer-display" aria-label={`${formatTime(elapsed)} sekunder`}>
+            {formatTime(elapsed)}
+            <small>SEKUNDER</small>
+          </div>
+          {!online && (
+            <p className="offline-warning"><WifiOff aria-hidden="true" /> Forbindelsen er væk. Uret fortsætter på serveren.</p>
+          )}
+          {error && <p className="form-message form-message--error" role="alert">{error}</p>}
+          <div className="stop-button" aria-hidden="true">
+            <CircleStop />
+            <span>STOP</span>
+            <small>tryk hvor som helst</small>
+          </div>
         </div>
-        <div className="timer-live__identity">{player && <Avatar username={player.username} path={player.avatar_path} size="medium" />}<div><span>Drikker for</span><strong>@{player?.username} · {clan?.name ?? "Global"}</strong></div></div>
-        {recordEvidence && <div className="timer-camera timer-camera--live"><video ref={attachCameraPreview} autoPlay muted playsInline /><button type="button" className="timer-camera__switch" onClick={switchCamera} disabled={!cameraReady || cameraSwitching} aria-label={cameraFacingMode === "environment" ? "Skift til frontkamera" : "Skift til bagkamera"}><SwitchCamera aria-hidden="true" /></button><span><Camera aria-hidden="true" /> Video optages</span></div>}
-        <div className="timer-display" aria-label={`${formatTime(elapsed)} sekunder`}>
-          {formatTime(elapsed)}
-          <small>SEKUNDER</small>
+        <div className="timer-live__cancel-zone">
+          <button className="text-button" onClick={() => {
+            if (window.confirm("Afbryd forsøget permanent?")) handleDecline();
+          }} disabled={pending || !activeAttempt}>
+            Afbryd forsøg
+          </button>
         </div>
-        {!online && (
-          <p className="offline-warning"><WifiOff aria-hidden="true" /> Forbindelsen er væk. Uret fortsætter på serveren.</p>
-        )}
-        {error && <p className="form-message form-message--error" role="alert">{error}</p>}
-        <button className="stop-button" onClick={handleStop} disabled={pending || !activeAttempt}>
-          <CircleStop aria-hidden="true" />
-          <span>STOP</span>
-        </button>
-        <button className="text-button" onClick={handleDecline} disabled={pending || !activeAttempt}>
-          Afbryd forsøg
-        </button>
       </section>
     );
   }

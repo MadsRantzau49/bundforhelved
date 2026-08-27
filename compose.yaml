@@ -148,7 +148,7 @@ services:
     volumes:
       - ./docker/generated/kong.yml:/var/lib/kong/kong.yml:ro
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${SUPABASE_GATEWAY_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 5s
@@ -199,6 +199,7 @@ services:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
         NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-docker-local}
+        NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
     restart: unless-stopped
     depends_on:
       bootstrap:
@@ -207,9 +208,12 @@ services:
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${ANON_KEY}
       NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-docker-local}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
       SUPABASE_INTERNAL_URL: http://gateway:8000
       SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
       AUTH_PASSWORD_PEPPER: ${AUTH_PASSWORD_PEPPER}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_SUBJECT: ${VAPID_SUBJECT}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
     ports:
       - "3000:3000"

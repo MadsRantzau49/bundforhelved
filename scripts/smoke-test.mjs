@@ -139,7 +139,8 @@ try {
     !serviceWorkerResponse.ok ||
     serviceWorkerResponse.headers.get("service-worker-allowed") !== "/" ||
     !serviceWorker.includes("/offline-static.html") ||
-    !serviceWorker.includes("navigationPreload")
+    !serviceWorker.includes("navigationPreload") ||
+    !serviceWorker.includes('addEventListener("push"')
   ) {
     throw new Error("The production service worker is missing required PWA behavior.");
   }
@@ -181,6 +182,17 @@ try {
   if (ownerProfiles.length !== 1 || ownerProfiles[0].role !== "user") {
     throw new Error("A new account did not receive a regular user profile.");
   }
+  await request(`${baseUrl}/rest/v1/rpc/upsert_push_subscription`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({
+      subscription_endpoint: "https://127.0.0.1/internal",
+      subscription_p256dh: "not-a-real-key",
+      subscription_auth: "not-a-real-secret",
+      subscription_user_agent: "smoke-test",
+    }),
+    expected: [400, 401, 403],
+  });
 
   await request(`${baseUrl}/rest/v1/profiles?id=eq.${owner.id}`, {
     method: "PATCH",
@@ -194,10 +206,10 @@ try {
   if (unchangedProfile[0]?.role !== "user") throw new Error("RLS allowed a user to grant themselves admin access.");
 
   const categories = await request(
-    `${baseUrl}/rest/v1/categories?is_active=eq.true&select=id,name&order=sort_order&limit=1`,
+    `${baseUrl}/rest/v1/categories?is_active=eq.true&select=id,name&order=sort_order&limit=2`,
     { headers: owner.headers },
   );
-  if (!categories.length) throw new Error("No active category was seeded.");
+  if (categories.length < 2) throw new Error("Fewer than two active categories were seeded.");
 
   const started = await request(`${baseUrl}/rest/v1/rpc/start_attempt`, {
     method: "POST",
@@ -281,6 +293,7 @@ try {
 
   await requestAndAcceptFriend(owner, observer);
   await requestAndAcceptFriend(owner, clanFriend);
+  await requestAndAcceptFriend(observer, outsider);
   await request(`${baseUrl}/rest/v1/rpc/add_friend_to_clan`, {
     method: "POST",
     headers: owner.headers,
@@ -296,6 +309,7 @@ try {
     player = actor.id,
     selectedClan = null,
     withEvidence = false,
+    unrelated = outsider,
   } = {}) {
     const created = await request(`${baseUrl}/rest/v1/rpc/start_attempt`, {
       method: "POST",
@@ -344,12 +358,41 @@ try {
     if (!reviewerQueue.some((item) => item.attempt_id === created.id)) {
       throw new Error("A friend's pending attempt was missing from the review queue.");
     }
-    const outsiderQueue = await request(`${baseUrl}/rest/v1/rpc/list_peer_review_attempts`, {
+    const reviewerBadges = await request(`${baseUrl}/rest/v1/rpc/get_social_badges`, {
       method: "POST",
-      headers: outsider.headers,
+      headers: reviewer.headers,
       body: "{}",
     });
-    if (outsiderQueue.some((item) => item.attempt_id === created.id)) {
+    if (reviewerBadges.peer_reviews < 1) {
+      throw new Error("A pending peer review did not appear in the Friends navigation badge.");
+    }
+    const pendingTopThreeNotifications = await request(
+      `${baseUrl}/rest/v1/notifications?attempt_id=eq.${created.id}&type=eq.leaderboard_top3&select=id`,
+      { headers: serviceHeaders },
+    );
+    if (pendingTopThreeNotifications.length) {
+      throw new Error("A pending peer review created a top-three notification before approval.");
+    }
+    const pingCreated = await request(`${baseUrl}/rest/v1/rpc/ping_friend_for_review`, {
+      method: "POST",
+      headers: actor.headers,
+      body: JSON.stringify({ friend: reviewer.id }),
+    });
+    if (pingCreated !== true) throw new Error("A player could not ping an eligible friend reviewer.");
+    const pingNotifications = await request(`${baseUrl}/rest/v1/rpc/list_notifications`, {
+      method: "POST",
+      headers: reviewer.headers,
+      body: JSON.stringify({ max_items: 20 }),
+    });
+    if (!pingNotifications.some((item) => item.type === "peer_review_ping" && item.source_user_id === actor.id)) {
+      throw new Error("A peer-review ping did not create a recipient notification.");
+    }
+    const unrelatedQueue = await request(`${baseUrl}/rest/v1/rpc/list_peer_review_attempts`, {
+      method: "POST",
+      headers: unrelated.headers,
+      body: "{}",
+    });
+    if (unrelatedQueue.some((item) => item.attempt_id === created.id)) {
       throw new Error("A pending attempt leaked into an unrelated user's review queue.");
     }
     if (evidencePath) {
@@ -357,7 +400,7 @@ try {
         headers: reviewer.headers,
       });
       await request(`${baseUrl}/storage/v1/object/attempt-videos/${evidencePath}`, {
-        headers: outsider.headers,
+        headers: unrelated.headers,
         expected: [400, 401, 403, 404],
       });
       const proxiedVideo = await fetch(`${appUrl}/api/attempt-videos/${evidencePath}`, {
@@ -367,7 +410,7 @@ try {
         throw new Error(`The same-origin friend video proxy failed (${proxiedVideo.status}).`);
       }
       const hiddenVideo = await fetch(`${appUrl}/api/attempt-videos/${evidencePath}`, {
-        headers: { Cookie: outsider.cookie },
+        headers: { Cookie: unrelated.cookie },
       });
       if (hiddenVideo.status !== 403) {
         throw new Error(`The video proxy exposed evidence to a non-friend (${hiddenVideo.status}).`);
@@ -379,7 +422,7 @@ try {
     }
     await request(`${baseUrl}/rest/v1/rpc/review_attempt`, {
       method: "POST",
-      headers: outsider.headers,
+      headers: unrelated.headers,
       body: JSON.stringify({ attempt: created.id, approve: true }),
       expected: [400, 401, 403],
     });
@@ -401,7 +444,49 @@ try {
   }
 
   const globalAttempt = await approveAttempt(owner, observer, { withEvidence: true });
-  const clanAttempt = await approveAttempt(observer, owner, { selectedClan: clanId });
+  const clanAttempt = await approveAttempt(observer, owner, { selectedClan: clanId, unrelated: clanFriend });
+  const outsiderAttempt = await approveAttempt(outsider, observer, { unrelated: owner });
+  const directorBoard = await request(`${baseUrl}/rest/v1/rpc/get_category_drink_director_leaderboard`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ category: categories[0].id, friends_only: false }),
+  });
+  if (!directorBoard.some((entry) => entry.user_id === owner.id && entry.approved_count === 1)) {
+    throw new Error("Druk Direktøren did not count the owner's approved attempt in its category.");
+  }
+  if (!directorBoard.some((entry) => entry.user_id === observer.id && entry.approved_count === 1)) {
+    throw new Error("Global Druk Direktøren did not count an approved clan attempt in its category.");
+  }
+  if (!directorBoard.some((entry) => entry.user_id === outsider.id && entry.approved_count === 1)) {
+    throw new Error("Global Druk Direktøren did not include a non-friend's approved attempt.");
+  }
+  const otherCategoryDirectorBoard = await request(`${baseUrl}/rest/v1/rpc/get_category_drink_director_leaderboard`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ category: categories[1].id, friends_only: false }),
+  });
+  if (otherCategoryDirectorBoard.some((entry) => [owner.id, observer.id, outsider.id].includes(entry.user_id))) {
+    throw new Error("Druk Direktøren mixed approved attempts between categories.");
+  }
+  const friendsDirectorBoard = await request(`${baseUrl}/rest/v1/rpc/get_category_drink_director_leaderboard`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ category: categories[0].id, friends_only: true }),
+  });
+  if (!friendsDirectorBoard.some((entry) => entry.user_id === owner.id) || !friendsDirectorBoard.some((entry) => entry.user_id === observer.id)) {
+    throw new Error("Friends Druk Direktøren did not include the current user and an accepted friend.");
+  }
+  if (friendsDirectorBoard.some((entry) => entry.user_id === outsider.id)) {
+    throw new Error("Friends Druk Direktøren included a user who is not a direct friend.");
+  }
+  const topThreeNotifications = await request(`${baseUrl}/rest/v1/rpc/list_notifications`, {
+    method: "POST",
+    headers: observer.headers,
+    body: JSON.stringify({ max_items: 20 }),
+  });
+  if (!topThreeNotifications.some((item) => item.type === "leaderboard_top3" && item.source_user_id === owner.id && item.position <= 3)) {
+    throw new Error("A new Friends top-three position did not notify an accepted friend.");
+  }
   const globalBoard = await request(`${baseUrl}/rest/v1/rpc/get_leaderboard`, {
     method: "POST",
     headers: owner.headers,
@@ -435,12 +520,121 @@ try {
   if (!friendsBoard.some((entry) => entry.attempt_id === clanAttempt.id)) {
     throw new Error("An accepted friend's attempt was missing from the Friends leaderboard.");
   }
+  if (friendsBoard.some((entry) => entry.attempt_id === outsiderAttempt.id)) {
+    throw new Error("A non-friend's attempt leaked onto the Friends leaderboard.");
+  }
+  const categoryPage = await request(`${appUrl}/rangliste?kategori=${categories[0].id}`, {
+    headers: { Cookie: owner.cookie },
+  });
+  const categoryScopeTabsStart = categoryPage.indexOf('aria-label="Vælg rangliste"');
+  const categoryTabsStart = categoryPage.indexOf('aria-label="Vælg kategori"');
+  const playerToggleStart = categoryPage.indexOf('aria-label="Vælg spillerfelt"');
+  const categoryScopeTabsMarkup = categoryPage.slice(categoryScopeTabsStart, categoryTabsStart);
+  if (
+    categoryScopeTabsStart < 0 ||
+    categoryTabsStart < 0 ||
+    playerToggleStart < 0 ||
+    !categoryScopeTabsMarkup.includes("Global") ||
+    categoryScopeTabsMarkup.includes(">Venner</a>") ||
+    !categoryPage.includes("Vis tider")
+  ) {
+    throw new Error("Category leaderboards did not use the shared Global/Friends toggle.");
+  }
+  const directorPage = await request(`${appUrl}/rangliste?kategori=${categories[0].id}&liste=direktoer`, {
+    headers: { Cookie: owner.cookie },
+  });
+  const scopeTabsStart = directorPage.indexOf('aria-label="Vælg rangliste"');
+  const directorCategoryTabsStart = directorPage.indexOf('aria-label="Vælg kategori"');
+  const directorToggleStart = directorPage.indexOf('aria-label="Vælg direktørfelt"');
+  const scopeTabsMarkup = directorPage.slice(scopeTabsStart, directorCategoryTabsStart);
+  const categoryTabsMarkup = directorPage.slice(directorCategoryTabsStart, directorToggleStart);
+  if (
+    scopeTabsStart < 0 ||
+    directorCategoryTabsStart < 0 ||
+    directorToggleStart < 0 ||
+    !scopeTabsMarkup.includes("Druk Direktøren") ||
+    categoryTabsMarkup.includes("Druk Direktøren") ||
+    !directorPage.includes("Vis direktører") ||
+    !directorPage.includes("Godkendte gennemførelser")
+  ) {
+    throw new Error("The category-specific Druk Direktøren page did not render its Global/Friends ranking.");
+  }
+  const friendsPage = await request(`${appUrl}/venner`, {
+    headers: { Cookie: owner.cookie },
+  });
+  if (!friendsPage.includes("Peer review") || friendsPage.indexOf("Peer review") > friendsPage.indexOf("Tilføj en ven")) {
+    throw new Error("The Friends page did not render peer review before friend management.");
+  }
+  const friendProfilePage = await request(`${appUrl}/venner/${observer.id}`, {
+    headers: { Cookie: owner.cookie },
+  });
+  if (!friendProfilePage.includes(`@${observer.username}`) || friendProfilePage.includes("Skift brugernavn") || friendProfilePage.includes("Skift adgangskode")) {
+    throw new Error("The friend profile did not render stats without account settings.");
+  }
+  const prefixResults = await request(`${baseUrl}/rest/v1/rpc/search_friend_profiles`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ prefix: observer.username.slice(0, 7) }),
+  });
+  if (!prefixResults.some((entry) => entry.user_id === observer.id) || prefixResults.length > 10) {
+    throw new Error("Prefix friend search did not return the matching profile within its limit.");
+  }
+  const friendProfile = await request(`${baseUrl}/rest/v1/rpc/get_friend_profile`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ friend: observer.id }),
+  });
+  if (friendProfile.profile?.id !== observer.id || !friendProfile.attempts.some((item) => item.id === clanAttempt.id)) {
+    throw new Error("An accepted friend could not view the friend's profile statistics.");
+  }
+  await request(`${baseUrl}/rest/v1/rpc/get_friend_profile`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: JSON.stringify({ friend: owner.id }),
+    expected: [400, 401, 403],
+  });
 
   const declinedFriendshipId = await request(`${baseUrl}/rest/v1/rpc/request_friend`, {
     method: "POST",
     headers: owner.headers,
     body: JSON.stringify({ target_username: outsider.username }),
   });
+  const requestNotifications = await request(`${baseUrl}/rest/v1/rpc/list_notifications`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: JSON.stringify({ max_items: 20 }),
+  });
+  const requestNotification = requestNotifications.find((item) => item.type === "friend_request" && item.source_user_id === owner.id);
+  if (!requestNotification) throw new Error("A friend request did not create a recipient notification.");
+  await request(`${baseUrl}/rest/v1/rpc/mark_notifications_read`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: JSON.stringify({ notification_ids: [requestNotification.notification_id] }),
+  });
+  const ownerNotificationsBeforeDelete = await request(`${baseUrl}/rest/v1/rpc/list_notifications`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ max_items: 50 }),
+  });
+  await request(`${baseUrl}/rest/v1/rpc/delete_all_notifications`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: "{}",
+  });
+  const outsiderNotificationsAfterDelete = await request(`${baseUrl}/rest/v1/rpc/list_notifications`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: JSON.stringify({ max_items: 20 }),
+  });
+  if (outsiderNotificationsAfterDelete.length) throw new Error("Notification clear-all left recipient notifications behind.");
+  const ownerNotificationsAfterDelete = await request(`${baseUrl}/rest/v1/rpc/list_notifications`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ max_items: 50 }),
+  });
+  if (ownerNotificationsAfterDelete.length !== ownerNotificationsBeforeDelete.length) {
+    throw new Error("Notification clear-all deleted another user's notifications.");
+  }
   await request(`${baseUrl}/rest/v1/rpc/respond_friend_request`, {
     method: "POST",
     headers: outsider.headers,
@@ -485,7 +679,23 @@ try {
     throw new Error("An authorized guest was missing from the timer player list.");
   }
 
-  await requestAndAcceptFriend(observer, outsider);
+  const recommendations = await request(`${baseUrl}/rest/v1/rpc/list_friend_recommendations`, {
+    method: "POST",
+    headers: owner.headers,
+    body: "{}",
+  });
+  if (!recommendations.some((item) => item.user_id === outsider.id && item.mutual_usernames.includes(observer.username))) {
+    throw new Error("A friend's accepted friend was not recommended.");
+  }
+  const privateClanProfile = await request(`${baseUrl}/rest/v1/rpc/get_friend_profile`, {
+    method: "POST",
+    headers: outsider.headers,
+    body: JSON.stringify({ friend: observer.id }),
+  });
+  const hiddenClanAttempt = privateClanProfile.attempts.find((item) => item.id === clanAttempt.id);
+  if (!hiddenClanAttempt || hiddenClanAttempt.scope_name !== "Privat klan" || hiddenClanAttempt.clan_id !== null) {
+    throw new Error("A friend profile exposed a private clan to a non-member.");
+  }
 
   const correctionAttempt = await request(`${baseUrl}/rest/v1/rpc/start_attempt`, {
     method: "POST",

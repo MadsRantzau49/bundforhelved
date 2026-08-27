@@ -12,10 +12,10 @@ const links = [
   { href: "/klaner", label: "Klaner", icon: UsersRound },
   { href: "/venner", label: "Venner", icon: Handshake },
   { href: "/guide", label: "Guide", icon: BookOpenText },
-  { href: "/profil", label: "Mig", icon: CircleUserRound },
+  { href: "/profil", label: "Statistikker", icon: CircleUserRound },
 ];
 
-export function BottomNav() {
+export function BottomNav({ friendAttentionCount = 0 }: { friendAttentionCount?: number }) {
   const pathname = usePathname();
   const online = useConnectionStatus();
 
@@ -35,7 +35,14 @@ export function BottomNav() {
               window.location.assign(new URL("/offline-static.html", window.location.origin).toString());
             }}
           >
-            <span className="bottom-nav__icon"><Icon aria-hidden="true" /></span>
+            <span className="bottom-nav__icon">
+              <Icon aria-hidden="true" />
+              {href === "/venner" && friendAttentionCount > 0 && (
+                <span className="bottom-nav__badge" aria-label={`${friendAttentionCount} vennehandlinger venter`}>
+                  {friendAttentionCount > 9 ? "9+" : friendAttentionCount}
+                </span>
+              )}
+            </span>
             <span>{label}</span>
           </Link>
         );
