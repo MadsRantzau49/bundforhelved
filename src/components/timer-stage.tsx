@@ -5,11 +5,10 @@ import { useRouter } from "next/navigation";
 import {
   Check,
   Camera,
-  ChevronRight,
   CircleStop,
   Globe2,
   Play,
-  RotateCcw,
+  Settings2,
   SwitchCamera,
   UserPlus,
   UsersRound,
@@ -18,6 +17,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import {
+  changeAttemptCategory,
   changeAttemptScope,
   confirmAttempt,
   declineAttempt,
@@ -30,6 +30,7 @@ import {
 import { Avatar } from "@/components/avatar";
 import { CategoryIcon } from "@/components/category-icon";
 import { CategoryVisual } from "@/components/category-visual";
+import { ClanImage } from "@/components/clan-image";
 import { GuestConnectForm } from "@/components/guest-connect-form";
 import { useConnectionStatus } from "@/lib/connection-status";
 import { formatTime } from "@/lib/format";
@@ -42,6 +43,8 @@ export function TimerStage({
   initialElapsedMs,
   initialPlayers,
   initialClanId,
+  initialPlayerId,
+  initialCategoryId,
 }: {
   categories: Category[];
   initialAttempt: Attempt | null;
@@ -49,27 +52,28 @@ export function TimerStage({
   initialElapsedMs: number;
   initialPlayers: TimerPlayer[];
   initialClanId: string | null;
+  initialPlayerId?: string;
+  initialCategoryId?: string;
 }) {
   const router = useRouter();
   const host = initialPlayers.find((player) => player.is_host) ?? initialPlayers[0];
   const [players, setPlayers] = useState(initialPlayers);
   const [activeAttempt, setActiveAttempt] = useState(initialAttempt);
   const [selectedPlayerId, setSelectedPlayerId] = useState(
-    initialAttempt?.user_id ?? host?.player_id ?? "",
+    initialAttempt?.user_id ?? initialPlayerId ?? host?.player_id ?? "",
   );
   const [selectedClanId, setSelectedClanId] = useState<string | null>(
     initialAttempt ? initialAttempt.clan_id : initialClanId,
   );
-  const [selectedId, setSelectedId] = useState(initialAttempt?.category_id ?? categories[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(initialAttempt?.category_id ?? initialCategoryId ?? categories[0]?.id ?? "");
   const [elapsed, setElapsed] = useState(initialElapsedMs);
   const elapsedRef = useRef(initialElapsedMs);
   const [clockRevision, setClockRevision] = useState(0);
   const [resumeRevision, setResumeRevision] = useState(0);
-  const [startMode, setStartMode] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [starting, setStarting] = useState(false);
   const [showGuestForm, setShowGuestForm] = useState(false);
-  const [showCorrection, setShowCorrection] = useState(false);
-  const [showScopeCorrection, setShowScopeCorrection] = useState(false);
+  const [showResultSettings, setShowResultSettings] = useState(false);
   const [recordEvidence, setRecordEvidence] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraFacingMode, setCameraFacingMode] = useState<"environment" | "user">("environment");
@@ -172,7 +176,7 @@ export function TimerStage({
 
   useEffect(() => {
     let disposed = false;
-    if (!startMode || !recordEvidence) return;
+    if (!recordEvidence) return;
     if (!window.isSecureContext) {
       queueMicrotask(() => {
         if (!disposed) {
@@ -233,7 +237,7 @@ export function TimerStage({
       cameraStreamRef.current = null;
       mediaRecorderRef.current = null;
     };
-  }, [recordEvidence, startMode]);
+  }, [recordEvidence]);
 
   function vibrate(pattern: number | number[]) {
     if ("vibrate" in navigator) navigator.vibrate(pattern);
@@ -443,9 +447,16 @@ export function TimerStage({
           router.refresh();
           return;
         }
-        setActiveAttempt(result.data);
-        setStartMode(false);
+        setSelectedPlayerId(result.data.user_id);
+        setSelectedId(result.data.category_id);
+        setSelectedClanId(result.data.clan_id);
+        setActiveAttempt(null);
+        setRecordEvidence(false);
+        setShowResultSettings(false);
+        elapsedRef.current = 0;
+        setElapsed(0);
         vibrate([50, 40, 50]);
+        router.refresh();
       } catch {
         setError("Tiden kunne ikke godkendes. Prøv igen.");
         router.refresh();
@@ -466,11 +477,10 @@ export function TimerStage({
           return;
         }
         setActiveAttempt(null);
-        setStartMode(false);
+        setRecordEvidence(false);
+        setShowResultSettings(false);
         elapsedRef.current = 0;
         setElapsed(0);
-        if (host) setSelectedPlayerId(host.player_id);
-        setSelectedClanId(null);
         router.refresh();
       } catch {
         setError("Forsøget kunne ikke afvises. Prøv igen.");
@@ -492,7 +502,6 @@ export function TimerStage({
         }
         setActiveAttempt(result.data);
         setSelectedPlayerId(nextPlayer.player_id);
-        setShowCorrection(false);
       } catch {
         setError("Spilleren kunne ikke ændres. Prøv igen.");
         router.refresh();
@@ -512,40 +521,28 @@ export function TimerStage({
         }
         setActiveAttempt(result.data);
         setSelectedClanId(nextClanId);
-        setShowScopeCorrection(false);
       } catch {
         setError("Ranglisten kunne ikke ændres. Prøv igen.");
       }
     });
   }
 
-  if (activeAttempt?.status === "pending_review") {
-    return (
-      <section className="review-submitted" style={{ "--accent": category?.accent_color } as React.CSSProperties}>
-        <span className="review-submitted__icon"><Check aria-hidden="true" /></span>
-        <p className="eyebrow">Sendt til peer review</p>
-        <h2>Tiden venter på en anden bruger</h2>
-        <div className="review-submitted__time">{formatTime(activeAttempt.elapsed_ms ?? elapsed)}<small>s</small></div>
-        <div className="review-submitted__identity">
-          {player && <Avatar username={player.username} path={player.avatar_path} size="large" />}
-          <div><strong>@{player?.username}</strong><span>{category?.name} · {clan?.name ?? "Global"}</span></div>
-        </div>
-        <p>En af spillerens accepterede venner kan nu bedømme tiden direkte under Venner.</p>
-        <button className="button button--primary button--wide" onClick={() => {
-          const query = new URLSearchParams({ kategori: activeAttempt.category_id, ny: "1" });
-          if (activeAttempt.clan_id) query.set("klan", activeAttempt.clan_id);
-          router.push(`/rangliste?${query.toString()}`);
-          router.refresh();
-        }}>Se tiden på ranglisten</button>
-        <button className="button button--ghost button--wide" onClick={() => {
-          setActiveAttempt(null);
-          setSelectedClanId(null);
-          setElapsed(0);
-          setRecordEvidence(false);
-          router.refresh();
-        }}>Sæt en ny tid</button>
-      </section>
-    );
+  function handleCategoryChange(nextCategoryId: string) {
+    if (!activeAttempt || nextCategoryId === activeAttempt.category_id) return;
+    setError(undefined);
+    startTransition(async () => {
+      try {
+        const result = await changeAttemptCategory(activeAttempt.id, nextCategoryId);
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        setActiveAttempt(result.data);
+        setSelectedId(nextCategoryId);
+      } catch {
+        setError("Kategorien kunne ikke ændres. Prøv igen.");
+      }
+    });
   }
 
   if (activeAttempt?.status === "awaiting_confirmation") {
@@ -555,23 +552,40 @@ export function TimerStage({
 
     return (
       <section className="result-stage" style={{ "--accent": category?.accent_color } as React.CSSProperties}>
-        <div className="result-stage__burst" aria-hidden="true" />
-        <p className="eyebrow">Uret er stoppet</p>
-        <div className="result-stage__time">{formatTime(activeAttempt.elapsed_ms ?? elapsed)}<small>sek</small></div>
-        <div className="result-stage__category">
-          <CategoryIcon iconKey={category?.icon_key ?? "cup"} />
-          <span>{category?.name} · {clan ? clan.name : "Global"}</span>
+        <div className="result-stage__top">
+          <div><p className="eyebrow">Uret er stoppet</p><div className="result-stage__time">{formatTime(activeAttempt.elapsed_ms ?? elapsed)}<small>sek</small></div></div>
+          <span>Er øllen helt tom?</span>
         </div>
-        <div className="attempt-player">
-          {player && <Avatar username={player.username} path={player.avatar_path} size="medium" />}
-          <div><span>Tiden registreres for</span><strong>@{player?.username ?? "ukendt"}</strong></div>
-          <button className="text-button" type="button" onClick={() => setShowCorrection((value) => !value)}>
-            Forkert person?
-          </button>
+        <button className="button button--primary button--wide result-confirm" onClick={handleConfirm} disabled={pending}>
+          <Check aria-hidden="true" /> {pending ? "Sender..." : "Ja, send til peer review"}
+        </button>
+        {error && <p className="form-message form-message--error" role="alert">{error}</p>}
+
+        <div className="timer-ready-config result-stage__config" aria-label="Tidens opsætning">
+          <div className="timer-ready-config__item">
+            {player && <Avatar username={player.username} path={player.avatar_path} size="large" />}
+            <span className="timer-ready-config__label">Hvem drak?</span>
+            <strong>@{player?.username}</strong>
+          </div>
+          <div className="timer-ready-config__item">
+            {category && <CategoryVisual iconKey={category.icon_key} imagePath={category.image_path} name={category.name} />}
+            <span className="timer-ready-config__label">Våben</span>
+            <strong>{category?.name}</strong>
+          </div>
+          <div className="timer-ready-config__item">
+            {clan ? <ClanImage name={clan.name} path={clan.image_path ?? null} className="timer-ready-config__clan" /> : <span className="timer-ready-config__global"><Globe2 aria-hidden="true" /></span>}
+            <span className="timer-ready-config__label">Hvor tæller tiden?</span>
+            <strong>{clan?.name ?? "Global"}</strong>
+          </div>
         </div>
-        {showCorrection && (
-          <div className="player-correction">
-            <strong>Flyt tiden før godkendelse</strong>
+
+        <button className="button button--ghost button--wide result-settings-toggle" type="button" aria-expanded={showResultSettings} onClick={() => setShowResultSettings((value) => !value)}>
+          <Settings2 aria-hidden="true" /> {showResultSettings ? "Luk indstillinger" : "Ændr indstillinger for denne tid"}
+        </button>
+
+        {showResultSettings && (
+          <div className="result-settings">
+            <div><p className="eyebrow">Hvem drak?</p>
             <div className="player-pills">
               {eligiblePlayers.map((item) => (
                 <button
@@ -590,36 +604,24 @@ export function TimerStage({
               </button>
             </div>
             {showGuestForm && <GuestConnectForm onConnected={addPlayer} onCancel={() => setShowGuestForm(false)} />}
-          </div>
-        )}
-        <div className="attempt-player attempt-scope">
-          <span className="attempt-scope__icon">{clan ? <UsersRound aria-hidden="true" /> : <Globe2 aria-hidden="true" />}</span>
-          <div><span>Tiden tæller på</span><strong>{clan?.name ?? "Global"}</strong></div>
-          <button className="text-button" type="button" onClick={() => setShowScopeCorrection((value) => !value)}>Forkert rangliste?</button>
-        </div>
-        {showScopeCorrection && (
-          <div className="player-correction">
-            <strong>Flyt tiden før peer review</strong>
+            </div>
+            <div><p className="eyebrow">Hvor tæller tiden?</p>
             <div className="timer-scope-tabs">
               <button type="button" className={clsx(!activeAttempt.clan_id && "is-selected")} disabled={pending || !activeAttempt.clan_id} onClick={() => handleScopeChange(null)}><Globe2 aria-hidden="true" /> Global</button>
               {(player?.clans ?? []).map((item) => <button type="button" key={item.id} className={clsx(activeAttempt.clan_id === item.id && "is-selected")} disabled={pending || activeAttempt.clan_id === item.id} onClick={() => handleScopeChange(item.id)}><UsersRound aria-hidden="true" /> {item.name}</button>)}
             </div>
+            </div>
+            <div><p className="eyebrow">Vælg våben</p>
+            <div className="category-grid">
+              {categories.map((item) => <button key={item.id} type="button" className={clsx("category-card", item.id === activeAttempt.category_id && "is-selected")} style={{ "--category-color": item.accent_color } as React.CSSProperties} disabled={pending || item.id === activeAttempt.category_id} onClick={() => handleCategoryChange(item.id)}><span className="category-card__check"><Check aria-hidden="true" /></span><CategoryVisual iconKey={item.icon_key} imagePath={item.image_path} name={item.name} /><strong>{item.name}</strong></button>)}
+            </div>
+            </div>
           </div>
         )}
-        <div className="confirm-card">
-          <span className="confirm-card__icon"><Check aria-hidden="true" /></span>
-          <h2>Er øllen helt tom?</h2>
-          <p>Bekræft at øllen er tom. Derefter kan en af spillerens venner godkende tiden.</p>
-          {error && <p className="form-message form-message--error" role="alert">{error}</p>}
-          <button className="button button--primary button--wide" onClick={handleConfirm} disabled={pending}>
-            <Check aria-hidden="true" /> Ja, send til peer review
-          </button>
-          <details className="safe-reject">
-            <summary>Øllen var ikke tom</summary>
-            <p>Afvisning er flyttet væk fra godkendelsen for at undgå fejltryk.</p>
-            <button className="button button--danger button--wide" onClick={() => { if (window.confirm("Afvis forsøget permanent?")) handleDecline(); }} disabled={pending}><X aria-hidden="true" /> Afvis forsøget</button>
-          </details>
-        </div>
+        <details className="safe-reject result-stage__reject">
+          <summary>Øllen var ikke tom</summary>
+          <button className="button button--danger button--wide" onClick={() => { if (window.confirm("Afvis forsøget permanent?")) handleDecline(); }} disabled={pending}><X aria-hidden="true" /> Afvis forsøget</button>
+        </details>
       </section>
     );
   }
@@ -667,49 +669,6 @@ export function TimerStage({
     );
   }
 
-  if (startMode) {
-    return (
-      <section className="timer-start-mode" style={{ "--accent": category?.accent_color } as React.CSSProperties}>
-        <div className="timer-start-mode__status"><i /> Klar til start</div>
-        <div className="timer-start-mode__selection">
-          <CategoryIcon iconKey={category?.icon_key ?? "cup"} />
-          <strong>{category?.name}</strong>
-          <span>{clan ? clan.name : "Global"} · @{player?.username}</span>
-        </div>
-        <div className="timer-start-identity">{player && <Avatar username={player.username} path={player.avatar_path} size="large" />}<div><span>Du starter for</span><strong>@{player?.username}</strong><small>{clan?.name ?? "Global"}</small></div></div>
-        <p>Hold øllen klar. Tiden starter for spilleren og ranglisten ovenfor, når du rammer knappen.</p>
-        {recordEvidence && <div className="timer-camera"><video ref={attachCameraPreview} autoPlay muted playsInline /><button type="button" className="timer-camera__switch" onClick={switchCamera} disabled={!cameraReady || cameraSwitching} aria-label={cameraFacingMode === "environment" ? "Skift til frontkamera" : "Skift til bagkamera"}><SwitchCamera aria-hidden="true" /></button><span><Camera aria-hidden="true" /> {cameraReady ? "Kamera klar" : "Åbner kamera..."}</span></div>}
-        {cameraError && <p className="form-message form-message--error" role="alert">{cameraError}</p>}
-        {error && <p className="form-message form-message--error" role="alert">{error}</p>}
-        {!online && (
-          <p className="offline-warning"><WifiOff aria-hidden="true" /> Forbindelsen ser ud til at være væk. Du kan stadig prøve.</p>
-        )}
-        <button
-          className="start-trigger"
-          type="button"
-          onClick={handleStart}
-          disabled={pending || starting || !selectedId || !selectedPlayerId || (recordEvidence && !cameraReady)}
-          aria-label="Start timeren"
-        >
-          {player ? <Avatar username={player.username} path={player.avatar_path} size="large" /> : <Play aria-hidden="true" />}
-          <span>START</span>
-          <small>tryk her</small>
-        </button>
-        <button
-          className="text-button"
-          type="button"
-          disabled={pending || starting}
-          onClick={() => {
-            setError(undefined);
-            setStartMode(false);
-          }}
-        >
-          Tilbage og ret valg
-        </button>
-      </section>
-    );
-  }
-
   if (!categories.length) {
     return (
       <section className="empty-state">
@@ -722,9 +681,50 @@ export function TimerStage({
 
   return (
     <section className="timer-idle" style={{ "--accent": category?.accent_color } as React.CSSProperties}>
+      <div className="timer-quick-start">
+        <div className="timer-start-mode__status"><i /> Klar til start</div>
+        <div className="timer-ready-config" aria-label="Valgt opsætning">
+          <div className="timer-ready-config__item">
+            {player && <Avatar username={player.username} path={player.avatar_path} size="large" />}
+            <span className="timer-ready-config__label">Hvem drikker?</span>
+            <strong>@{player?.username}</strong>
+          </div>
+          <div className="timer-ready-config__item">
+            {category && <CategoryVisual iconKey={category.icon_key} imagePath={category.image_path} name={category.name} />}
+            <span className="timer-ready-config__label">Dit våben</span>
+            <strong>{category?.name}</strong>
+          </div>
+          <div className="timer-ready-config__item timer-ready-config__item--scope">
+            {clan ? <ClanImage name={clan.name} path={clan.image_path ?? null} className="timer-ready-config__clan" /> : <span className="timer-ready-config__global"><Globe2 aria-hidden="true" /></span>}
+            <span className="timer-ready-config__label">Hvor tæller tiden?</span>
+            <strong>{clan?.name ?? "Global"}</strong>
+          </div>
+        </div>
+
+        {recordEvidence && <div className="timer-camera"><video ref={attachCameraPreview} autoPlay muted playsInline /><button type="button" className="timer-camera__switch" onClick={switchCamera} disabled={!cameraReady || cameraSwitching} aria-label={cameraFacingMode === "environment" ? "Skift til frontkamera" : "Skift til bagkamera"}><SwitchCamera aria-hidden="true" /></button><span><Camera aria-hidden="true" /> {cameraReady ? "Kamera klar" : "Åbner kamera..."}</span></div>}
+        {cameraError && <p className="form-message form-message--error" role="alert">{cameraError}</p>}
+        {error && <p className="form-message form-message--error" role="alert">{error}</p>}
+        {!online && <p className="offline-warning"><WifiOff aria-hidden="true" /> Forbindelsen ser ud til at være væk. Du kan stadig prøve.</p>}
+        <button
+          className="start-trigger"
+          type="button"
+          onClick={handleStart}
+          disabled={pending || starting || !selectedId || !selectedPlayerId || (recordEvidence && !cameraReady)}
+          aria-label="Start timeren"
+        >
+          <Play aria-hidden="true" />
+          <span>{starting ? "STARTER" : "START"}</span>
+          <small>begynd at drikke</small>
+        </button>
+        <button className="button button--ghost timer-settings-toggle" type="button" aria-expanded={showSettings} onClick={() => setShowSettings((value) => !value)}>
+          <Settings2 aria-hidden="true" /> {showSettings ? "Luk indstillinger" : "Ændr indstillinger"}
+        </button>
+      </div>
+
+      {showSettings && <div className="timer-settings">
       <div className="timer-choice">
         <div className="section-heading">
-          <div><p className="eyebrow">Trin 1</p><h2>Hvem drikker?</h2></div>
+          <div><p className="eyebrow">Indstilling</p><h2>Hvem drikker?</h2></div>
           <span>Delt telefon</span>
         </div>
         <div className="player-pills" role="radiogroup" aria-label="Vælg spiller">
@@ -750,7 +750,7 @@ export function TimerStage({
 
       <div className="timer-choice">
         <div className="section-heading">
-          <div><p className="eyebrow">Trin 2</p><h2>Hvor tæller tiden?</h2></div>
+          <div><p className="eyebrow">Indstilling</p><h2>Hvor tæller tiden?</h2></div>
         </div>
         <div className="timer-scope-tabs" role="radiogroup" aria-label="Vælg rangliste">
           <button
@@ -782,7 +782,7 @@ export function TimerStage({
 
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Trin 3</p>
+          <p className="eyebrow">Indstilling</p>
           <h2>Vælg dit våben</h2>
         </div>
         <span>{categories.length} kategorier</span>
@@ -809,31 +809,9 @@ export function TimerStage({
         })}
       </div>
 
-      <div className="ready-card">
-        <div className="ready-card__top">
-          <span><RotateCcw aria-hidden="true" /> Servertid</span>
-          <span className={clsx("connection-dot", !online && "is-offline")}>{online ? "Online" : "Offline"}</span>
-        </div>
-        <div className="ready-card__dial">
-          <span>0.00</span>
-          <small>sekunder</small>
-        </div>
-        <div className="ready-card__identity">{player && <Avatar username={player.username} path={player.avatar_path} size="medium" />}<p><strong>@{player?.username}</strong><span>{clan?.name ?? "Global"} · {category?.name}</span></p></div>
-        <p>Tjek spiller og rangliste ovenfor. Uret starter først, når serveren svarer.</p>
-        <label className="timer-record-option"><input type="checkbox" checked={recordEvidence} onChange={(event) => setRecordEvidence(event.target.checked)} /><Camera aria-hidden="true" /><span><strong>Optag forsøget</strong><small>Frivillig video til peer review</small></span></label>
-        {error && <p className="form-message form-message--error" role="alert">{error}</p>}
-        <button
-          className="button button--start"
-          onClick={() => {
-            setError(undefined);
-            setStartMode(true);
-          }}
-          disabled={pending || !selectedId || !selectedPlayerId}
-        >
-          <span>GÅ TIL START</span>
-          <ChevronRight aria-hidden="true" />
-        </button>
-      </div>
+      <label className="timer-record-option"><input type="checkbox" checked={recordEvidence} onChange={(event) => setRecordEvidence(event.target.checked)} /><Camera aria-hidden="true" /><span><strong>Optag forsøget</strong><small>Frivillig video til peer review</small></span></label>
+      <button className="button button--primary button--wide" type="button" onClick={() => setShowSettings(false)}><Check aria-hidden="true" /> Brug denne opsætning</button>
+      </div>}
     </section>
   );
 }

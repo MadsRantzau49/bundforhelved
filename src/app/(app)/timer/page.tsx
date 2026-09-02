@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { TimerStage } from "@/components/timer-stage";
-import { PageHeader } from "@/components/page-header";
 import { requireProfile } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Attempt, Category, TimerPlayer } from "@/types/app";
@@ -15,7 +14,7 @@ export default async function TimerPage({
   const params = await searchParams;
   const profile = await requireProfile();
   const supabase = await createSupabaseServerClient();
-  const [categoriesResult, attemptResult, playersResult] = await Promise.all([
+  const [categoriesResult, attemptResult, playersResult, latestAttemptResult] = await Promise.all([
     supabase
       .from("categories")
       .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
@@ -30,19 +29,45 @@ export default async function TimerPage({
       .limit(1)
       .maybeSingle(),
     supabase.rpc("get_timer_players"),
+    supabase
+      .from("attempts")
+      .select("user_id, category_id, clan_id")
+      .eq("recorded_by", profile.id)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
 
-  if (categoriesResult.error || attemptResult.error || playersResult.error) {
+  if (categoriesResult.error || attemptResult.error || playersResult.error || latestAttemptResult.error) {
     throw new Error("Timerdata kunne ikke hentes.");
   }
 
   const categories = (categoriesResult.data ?? []) as Category[];
   const activeAttempt = (attemptResult.data as Attempt | null) ?? null;
-  const players = (playersResult.data ?? []) as TimerPlayer[];
+  let players = (playersResult.data ?? []) as TimerPlayer[];
+  const clanIds = [...new Set(players.flatMap((player) => player.clans.map((clan) => clan.id)))];
+  if (clanIds.length) {
+    const { data, error } = await supabase.from("clans").select("id, image_path").in("id", clanIds);
+    if (error) throw new Error("Klanbillederne kunne ikke hentes.");
+    const clanImages = new Map((data ?? []).map((clan) => [clan.id, clan.image_path]));
+    players = players.map((player) => ({
+      ...player,
+      clans: player.clans.map((clan) => ({ ...clan, image_path: clanImages.get(clan.id) ?? null })),
+    }));
+  }
   const host = players.find((player) => player.is_host);
-  const initialClanId = !activeAttempt && host?.clans.some((clan) => clan.id === params.klan)
-    ? params.klan ?? null
+  const latestAttempt = latestAttemptResult.data;
+  const configuredPlayer = players.find((player) => player.player_id === latestAttempt?.user_id) ?? host;
+  const initialPlayerId = activeAttempt?.user_id ?? configuredPlayer?.player_id ?? "";
+  const initialCategoryId = activeAttempt?.category_id
+    ?? (categories.some((category) => category.id === latestAttempt?.category_id) ? latestAttempt?.category_id : categories[0]?.id)
+    ?? "";
+  const initialPlayer = players.find((player) => player.player_id === initialPlayerId);
+  const requestedClanId = params.klan && initialPlayer?.clans.some((clan) => clan.id === params.klan) ? params.klan : null;
+  const previousClanId = latestAttempt?.clan_id && initialPlayer?.clans.some((clan) => clan.id === latestAttempt.clan_id)
+    ? latestAttempt.clan_id
     : null;
+  const initialClanId = activeAttempt?.clan_id ?? requestedClanId ?? previousClanId;
   let initialElapsedMs = activeAttempt?.elapsed_ms ?? 0;
   if (activeAttempt?.status === "running") {
     const elapsedResult = await supabase.rpc("get_attempt_live_elapsed", { attempt: activeAttempt.id });
@@ -62,11 +87,6 @@ export default async function TimerPage({
 
   return (
     <div className="page page--timer">
-      <PageHeader
-        eyebrow={`Delt telefon: @${profile.username}`}
-        title="Bund den. Sæt tiden."
-        description="Vælg spiller, rangliste og kategori. Serveren holder øje med hundrededelene."
-      />
       <TimerStage
         key={[
           activeAttempt?.id ?? "idle",
@@ -81,6 +101,8 @@ export default async function TimerPage({
         initialElapsedMs={initialElapsedMs}
         initialPlayers={players}
         initialClanId={initialClanId}
+        initialPlayerId={initialPlayerId}
+        initialCategoryId={initialCategoryId}
       />
     </div>
   );

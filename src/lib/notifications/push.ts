@@ -68,7 +68,7 @@ export async function deliverPendingPushNotifications(userIds?: string[]) {
           await webpush.sendNotification(pushSubscription, JSON.stringify({
             title: notification.title,
             body: notification.body,
-            url: notification.url,
+            url: notification.type === "peer_review_ping" ? "/peer-review" : notification.url,
             tag: notification.id,
           }), { TTL: 60 * 60 * 24, timeout: 10_000 });
           delivered = true;

@@ -114,7 +114,7 @@ export function NotificationCenter({
             <div className="notification-list">
               {notifications.map((notification) => (
                 <Link
-                  href={notification.url}
+                  href={notification.type === "peer_review_ping" ? "/peer-review" : notification.url}
                   className={clsx(!notification.read_at && "is-unread")}
                   key={notification.notification_id}
                   onClick={() => {

@@ -1,25 +1,18 @@
 import type { Metadata } from "next";
-import { ScanSearch, UsersRound } from "lucide-react";
+import { UsersRound } from "lucide-react";
 import { FriendManager } from "@/components/friend-manager";
 import { PageHeader } from "@/components/page-header";
-import { PeerReviewList } from "@/components/peer-review-list";
 import { requireProfile } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { FriendRecommendation, Friendship, PeerReviewAttempt } from "@/types/app";
+import type { FriendRecommendation, Friendship } from "@/types/app";
 
 export const metadata: Metadata = { title: "Venner" };
-
-function evidenceUrl(path: string | null) {
-  if (!path) return null;
-  return `/api/attempt-videos/${path.split("/").map(encodeURIComponent).join("/")}`;
-}
 
 export default async function FriendsPage() {
   const profile = await requireProfile();
   const supabase = await createSupabaseServerClient();
-  const [friendshipsResult, attemptsResult, recommendationsResult, ownPendingResult] = await Promise.all([
+  const [friendshipsResult, recommendationsResult, ownPendingResult] = await Promise.all([
     supabase.rpc("list_friendships"),
-    supabase.rpc("list_peer_review_attempts"),
     supabase.rpc("list_friend_recommendations"),
     supabase
       .from("attempts")
@@ -28,7 +21,7 @@ export default async function FriendsPage() {
       .eq("status", "pending_review"),
   ]);
 
-  if (friendshipsResult.error || attemptsResult.error || recommendationsResult.error || ownPendingResult.error) {
+  if (friendshipsResult.error || recommendationsResult.error || ownPendingResult.error) {
     throw new Error("Venner kunne ikke hentes.");
   }
 
@@ -40,28 +33,14 @@ export default async function FriendsPage() {
       (attempt) => !attempt.recorded_by || attempt.recorded_by !== relationship.other_user_id,
     ))
     .map((relationship) => relationship.other_user_id);
-  const attempts = ((attemptsResult.data ?? []) as PeerReviewAttempt[]).map((attempt) => ({
-    ...attempt,
-    evidence_video_url: evidenceUrl(attempt.evidence_video_path),
-  }));
-
   return (
     <div className="page page--friends">
       <PageHeader
-        eyebrow="Vennebog og dommerbord"
+        eyebrow="Din vennebog"
         title="Venner"
-        description="Tilføj spillere, svar på anmodninger, og peer review dine venners tider uden en kode."
+        description="Tilføj spillere, svar på anmodninger, og hold styr på din venneliste."
         action={<span className="header-clan"><UsersRound aria-hidden="true" /></span>}
       />
-
-      <section className="friend-reviews" id="reviews">
-        <div className="section-heading">
-          <div><p className="eyebrow">Vennernes tider</p><h2>Peer review</h2></div>
-          <span className={attempts.length ? "friend-reviews__count is-active" : "friend-reviews__count"}><ScanSearch aria-hidden="true" /> {attempts.length}</span>
-        </div>
-        <p className="friend-reviews__lead">Du ser kun tider fra accepterede venner, som ikke er optaget på din konto.</p>
-        <PeerReviewList initialAttempts={attempts} />
-      </section>
 
       <FriendManager
         relationships={relationships}

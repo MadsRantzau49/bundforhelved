@@ -108,7 +108,9 @@ export type ClanMembership = {
   clans: Clan;
 };
 
-export type TimerClan = Pick<Clan, "id" | "name">;
+export type TimerClan = Pick<Clan, "id" | "name"> & {
+  image_path?: string | null;
+};
 
 export type TimerPlayer = {
   player_id: string;

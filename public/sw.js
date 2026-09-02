@@ -7,6 +7,7 @@ const PRECACHE_ASSETS = [
   "/manifest.webmanifest",
   "/icons/apple-touch-icon.png",
   "/icons/icon-192.png",
+  "/icons/notification-badge.png",
   "/icons/icon-512.png",
   "/icons/icon-maskable-512.png",
 ];
@@ -46,7 +47,7 @@ self.addEventListener("push", (event) => {
     self.registration.showNotification(payload.title || "bund forhelved", {
       body: payload.body || "Du har en ny notifikation.",
       icon: "/icons/icon-192.png",
-      badge: "/icons/icon-192.png",
+      badge: "/icons/notification-badge.png",
       tag: payload.tag,
       data: { url: payload.url || "/venner" },
       vibrate: [100, 50, 100],

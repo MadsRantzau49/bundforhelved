@@ -21,7 +21,7 @@ export async function reviewAttemptAction(
       approve,
     });
     if (error) throw error;
-    revalidatePath("/venner");
+    revalidatePath("/peer-review");
     revalidatePath("/rangliste");
     revalidatePath("/profil");
     revalidatePath("/admin");

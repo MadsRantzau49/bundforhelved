@@ -11,22 +11,6 @@ export function ClanForms() {
 
   return (
     <div className="clan-form-grid">
-      <form action={createAction} className="panel clan-form">
-        <span className="panel-icon"><Plus aria-hidden="true" /></span>
-        <p className="eyebrow">Din egen hjemmebane</p>
-        <h2>Opret en klan</h2>
-        <p>Saml vennerne, og få jeres egen interne top.</p>
-        <div className="field">
-          <label htmlFor="clan-name">Klannavn</label>
-          <div className="input-wrap">
-            <UsersRound aria-hidden="true" />
-            <input id="clan-name" name="name" minLength={2} maxLength={64} placeholder="Sommerhus 2026" required />
-          </div>
-        </div>
-        <FormMessage {...createState} />
-        <SubmitButton className="button--primary button--wide" pendingLabel="Opretter...">Opret klan</SubmitButton>
-      </form>
-
       <form action={joinAction} className="panel clan-form panel--amber">
         <span className="panel-icon"><Hash aria-hidden="true" /></span>
         <p className="eyebrow">Har du fået en kode?</p>
@@ -50,6 +34,22 @@ export function ClanForms() {
         </div>
         <FormMessage {...joinState} />
         <SubmitButton className="button--secondary button--wide" pendingLabel="Finder klan...">Tilmeld mig</SubmitButton>
+      </form>
+
+      <form action={createAction} className="panel clan-form">
+        <span className="panel-icon"><Plus aria-hidden="true" /></span>
+        <p className="eyebrow">Din egen hjemmebane</p>
+        <h2>Opret en klan</h2>
+        <p>Saml vennerne, og få jeres egen interne top.</p>
+        <div className="field">
+          <label htmlFor="clan-name">Klannavn</label>
+          <div className="input-wrap">
+            <UsersRound aria-hidden="true" />
+            <input id="clan-name" name="name" minLength={2} maxLength={64} placeholder="Sommerhus 2026" required />
+          </div>
+        </div>
+        <FormMessage {...createState} />
+        <SubmitButton className="button--primary button--wide" pendingLabel="Opretter...">Opret klan</SubmitButton>
       </form>
     </div>
   );
