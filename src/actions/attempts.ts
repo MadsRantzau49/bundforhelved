@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { errorMessage } from "@/lib/errors";
+import { deliverPendingPushNotifications } from "@/lib/notifications/push";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { uuidSchema } from "@/lib/validation";
 import type { ActionResult, Attempt, StartedAttempt } from "@/types/app";
@@ -22,6 +23,7 @@ async function attemptRpc(
       revalidatePath("/peer-review");
       revalidatePath("/venner");
       revalidatePath("/admin");
+      await deliverPendingPushNotifications();
     }
     return { ok: true, data: data as Attempt };
   } catch (error) {

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireProfile } from "@/lib/auth/session";
 import { getErrorText } from "@/lib/errors";
+import { deliverPendingPushNotifications } from "@/lib/notifications/push";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { uuidSchema } from "@/lib/validation";
 import type { ActionResult } from "@/types/app";
@@ -24,6 +25,7 @@ export async function reviewAttemptAction(
     revalidatePath("/rangliste");
     revalidatePath("/profil");
     revalidatePath("/admin");
+    if (approve) await deliverPendingPushNotifications();
     return { ok: true, data: undefined };
   } catch (error) {
     const message = getErrorText(error).toLowerCase();

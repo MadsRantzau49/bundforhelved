@@ -101,8 +101,12 @@ export async function signupAction(
   redirect("/timer");
 }
 
-export async function logoutAction() {
+export async function logoutAction(formData?: FormData) {
   const supabase = await createSupabaseServerClient();
+  const pushEndpoint = formData?.get("push_endpoint");
+  if (typeof pushEndpoint === "string" && pushEndpoint) {
+    await supabase.rpc("remove_push_subscription", { subscription_endpoint: pushEndpoint });
+  }
   await supabase.auth.signOut();
   redirect("/login");
 }

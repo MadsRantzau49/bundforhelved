@@ -65,6 +65,14 @@ export type LeaderboardEntry = {
   reviewer_username: string | null;
 };
 
+export type DrinkDirectorEntry = {
+  rank: number;
+  user_id: string;
+  username: string;
+  avatar_path: string | null;
+  approved_count: number;
+};
+
 export type PeerReviewAttempt = {
   attempt_id: string;
   user_id: string;
@@ -126,6 +134,78 @@ export type Friendship = {
   avatar_path: string | null;
   direction: "friend" | "incoming" | "outgoing";
   created_at: string;
+};
+
+export type FriendSearchResult = {
+  user_id: string;
+  username: string;
+  avatar_path: string | null;
+  relationship: "friend" | "incoming" | "outgoing" | null;
+};
+
+export type FriendRecommendation = {
+  user_id: string;
+  username: string;
+  avatar_path: string | null;
+  mutual_friend_count: number;
+  mutual_usernames: string[];
+};
+
+export type ProfileAttempt = {
+  id: string;
+  category_id: string;
+  clan_id: string | null;
+  elapsed_ms: number;
+  confirmed_at: string | null;
+  submitted_for_review_at: string | null;
+  reviewed_by: string | null;
+  status: "approved" | "pending_review" | "invalidated";
+  invalidated_reason: string | null;
+  created_at: string;
+  scope_name?: string;
+  categories: {
+    id: string;
+    name: string;
+    icon_key: string;
+    accent_color: string;
+  };
+  reviewer: { username: string } | null;
+};
+
+export type FriendProfileData = {
+  profile: Profile;
+  attempts: ProfileAttempt[];
+};
+
+export type AchievementAsset = {
+  achievement_key: string;
+  image_path: string | null;
+};
+
+export type SocialBadges = {
+  friend_requests: number;
+  peer_reviews: number;
+  notifications: number;
+};
+
+export type SocialNotification = {
+  notification_id: string;
+  type: "friend_request" | "peer_review_ping" | "leaderboard_top3";
+  title: string;
+  body: string;
+  url: string;
+  source_user_id: string | null;
+  source_username: string | null;
+  source_avatar_path: string | null;
+  position: number | null;
+  created_at: string;
+  read_at: string | null;
+};
+
+export type NotificationPreferences = {
+  friends_top_three: boolean;
+  peer_review_pings: boolean;
+  friend_requests: boolean;
 };
 
 export type ActionResult<T = undefined> =

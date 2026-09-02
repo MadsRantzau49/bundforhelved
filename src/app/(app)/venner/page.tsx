@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { PeerReviewList } from "@/components/peer-review-list";
 import { requireProfile } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Friendship, PeerReviewAttempt } from "@/types/app";
+import type { FriendRecommendation, Friendship, PeerReviewAttempt } from "@/types/app";
 
 export const metadata: Metadata = { title: "Venner" };
 
@@ -15,18 +15,31 @@ function evidenceUrl(path: string | null) {
 }
 
 export default async function FriendsPage() {
-  await requireProfile();
+  const profile = await requireProfile();
   const supabase = await createSupabaseServerClient();
-  const [friendshipsResult, attemptsResult] = await Promise.all([
+  const [friendshipsResult, attemptsResult, recommendationsResult, ownPendingResult] = await Promise.all([
     supabase.rpc("list_friendships"),
     supabase.rpc("list_peer_review_attempts"),
+    supabase.rpc("list_friend_recommendations"),
+    supabase
+      .from("attempts")
+      .select("recorded_by")
+      .eq("user_id", profile.id)
+      .eq("status", "pending_review"),
   ]);
 
-  if (friendshipsResult.error || attemptsResult.error) {
+  if (friendshipsResult.error || attemptsResult.error || recommendationsResult.error || ownPendingResult.error) {
     throw new Error("Venner kunne ikke hentes.");
   }
 
   const relationships = (friendshipsResult.data ?? []) as Friendship[];
+  const recommendations = (recommendationsResult.data ?? []) as FriendRecommendation[];
+  const pingableFriendIds = relationships
+    .filter((relationship) => relationship.direction === "friend")
+    .filter((relationship) => (ownPendingResult.data ?? []).some(
+      (attempt) => !attempt.recorded_by || attempt.recorded_by !== relationship.other_user_id,
+    ))
+    .map((relationship) => relationship.other_user_id);
   const attempts = ((attemptsResult.data ?? []) as PeerReviewAttempt[]).map((attempt) => ({
     ...attempt,
     evidence_video_url: evidenceUrl(attempt.evidence_video_path),
@@ -41,16 +54,20 @@ export default async function FriendsPage() {
         action={<span className="header-clan"><UsersRound aria-hidden="true" /></span>}
       />
 
-      <FriendManager relationships={relationships} />
-
       <section className="friend-reviews" id="reviews">
         <div className="section-heading">
           <div><p className="eyebrow">Vennernes tider</p><h2>Peer review</h2></div>
-          <ScanSearch aria-hidden="true" />
+          <span className={attempts.length ? "friend-reviews__count is-active" : "friend-reviews__count"}><ScanSearch aria-hidden="true" /> {attempts.length}</span>
         </div>
         <p className="friend-reviews__lead">Du ser kun tider fra accepterede venner, som ikke er optaget på din konto.</p>
         <PeerReviewList initialAttempts={attempts} />
       </section>
+
+      <FriendManager
+        relationships={relationships}
+        recommendations={recommendations}
+        pingableFriendIds={pingableFriendIds}
+      />
     </div>
   );
 }

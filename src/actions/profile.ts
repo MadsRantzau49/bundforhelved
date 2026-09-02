@@ -59,7 +59,8 @@ export async function uploadAvatarAction(
     await supabase.storage.from("avatars").remove([profile.avatar_path]);
   }
 
-  revalidatePath("/profil");
+    revalidatePath("/profil");
+    revalidatePath("/indstillinger");
   revalidatePath("/rangliste");
   return { success: "Profilbilledet er opdateret." };
 }
