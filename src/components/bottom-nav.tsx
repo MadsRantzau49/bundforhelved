@@ -2,20 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpenText, CircleUserRound, Handshake, TimerReset, Trophy, UsersRound } from "lucide-react";
+import { CircleUserRound, ScanSearch, TimerReset, Trophy } from "lucide-react";
 import clsx from "clsx";
 import { useConnectionStatus } from "@/lib/connection-status";
 
 const links = [
-  { href: "/timer", label: "Timer", icon: TimerReset },
-  { href: "/rangliste", label: "Toppen", icon: Trophy },
-  { href: "/klaner", label: "Klaner", icon: UsersRound },
-  { href: "/venner", label: "Venner", icon: Handshake },
-  { href: "/guide", label: "Guide", icon: BookOpenText },
-  { href: "/profil", label: "Statistikker", icon: CircleUserRound },
+  { href: "/timer", label: "Tag tid", icon: TimerReset },
+  { href: "/rangliste", label: "Resultater", icon: Trophy },
+  { href: "/peer-review", label: "Godkend tider", icon: ScanSearch },
+  { href: "/profil", label: "Stats", icon: CircleUserRound },
 ];
 
-export function BottomNav({ friendAttentionCount = 0 }: { friendAttentionCount?: number }) {
+export function BottomNav({ reviewCount = 0 }: { reviewCount?: number }) {
   const pathname = usePathname();
   const online = useConnectionStatus();
 
@@ -37,9 +35,9 @@ export function BottomNav({ friendAttentionCount = 0 }: { friendAttentionCount?:
           >
             <span className="bottom-nav__icon">
               <Icon aria-hidden="true" />
-              {href === "/venner" && friendAttentionCount > 0 && (
-                <span className="bottom-nav__badge" aria-label={`${friendAttentionCount} vennehandlinger venter`}>
-                  {friendAttentionCount > 9 ? "9+" : friendAttentionCount}
+              {href === "/peer-review" && reviewCount > 0 && (
+                <span className="bottom-nav__badge" aria-label={`${reviewCount} tider venter på godkendelse`}>
+                  {reviewCount > 9 ? "9+" : reviewCount}
                 </span>
               )}
             </span>

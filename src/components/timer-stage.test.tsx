@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { confirmAttempt, declineAttempt, startAttempt, stopAttempt, syncAttemptElapsed } from "@/actions/attempts";
+import { changeAttemptCategory, confirmAttempt, declineAttempt, startAttempt, stopAttempt, syncAttemptElapsed } from "@/actions/attempts";
 import { TimerStage } from "@/components/timer-stage";
 import type { Attempt, Category, TimerPlayer } from "@/types/app";
 
@@ -15,6 +15,7 @@ vi.mock("@/actions/attempts", () => ({
   declineAttempt: vi.fn(),
   reassignAttempt: vi.fn(),
   changeAttemptScope: vi.fn(),
+  changeAttemptCategory: vi.fn(),
   syncAttemptElapsed: vi.fn(),
   uploadAttemptEvidence: vi.fn(),
 }));
@@ -35,6 +36,13 @@ const category: Category = {
   demo_video_path: null,
   sort_order: 1,
   is_active: true,
+};
+
+const secondCategory: Category = {
+  ...category,
+  id: "00000000-0000-4000-8000-000000000002",
+  name: "Krus",
+  icon_key: "mug",
 };
 
 const host: TimerPlayer = {
@@ -151,7 +159,7 @@ describe("TimerStage", () => {
     expect(stopAttempt).not.toHaveBeenCalled();
   });
 
-  it("opens a large start mode before starting for the selected scope", async () => {
+  it("starts immediately for the displayed configuration", async () => {
     vi.mocked(startAttempt).mockResolvedValue({
       ok: true,
       data: { attempt: attempt(), live_elapsed_ms: 0 },
@@ -167,15 +175,12 @@ describe("TimerStage", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /gå til start/i }));
-    expect(startAttempt).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /start timeren/i })).toHaveClass("start-trigger");
-
     fireEvent.click(screen.getByRole("button", { name: /start timeren/i }));
     await waitFor(() => expect(startAttempt).toHaveBeenCalledWith(category.id, null, host.player_id));
   });
 
-  it("submits a stopped attempt for review by friends without a code", async () => {
+  it("returns directly to a ready timer after submitting a stopped attempt", async () => {
     vi.mocked(confirmAttempt).mockResolvedValue({
       ok: true,
       data: attempt({
@@ -202,8 +207,38 @@ describe("TimerStage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /send til peer review/i }));
     await waitFor(() => expect(confirmAttempt).toHaveBeenCalled());
-    expect(screen.getByText(/accepterede venner kan nu bedømme tiden direkte/i)).toBeInTheDocument();
-    expect(screen.queryByText(/reviewkode/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start timeren/i })).toBeInTheDocument();
+    expect(screen.queryByText(/tiden venter på en anden bruger/i)).not.toBeInTheDocument();
+  });
+
+  it("lets the recorder change the weapon before submitting", async () => {
+    vi.mocked(changeAttemptCategory).mockResolvedValue({
+      ok: true,
+      data: attempt({
+        status: "awaiting_confirmation",
+        category_id: secondCategory.id,
+        stopped_at: "2099-01-01T00:00:02.000Z",
+        elapsed_ms: 2_000,
+      }),
+    });
+    render(
+      <TimerStage
+        categories={[category, secondCategory]}
+        initialAttempt={attempt({ status: "awaiting_confirmation", stopped_at: "2099-01-01T00:00:02.000Z", elapsed_ms: 2_000 })}
+        attemptCategory={null}
+        initialElapsedMs={2_000}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /ændr indstillinger for denne tid/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Krus" }));
+
+    await waitFor(() => expect(changeAttemptCategory).toHaveBeenCalledWith(
+      "20000000-0000-4000-8000-000000000001",
+      secondCategory.id,
+    ));
   });
 
   it("explains that phone video needs HTTPS and keeps the timer usable", async () => {
@@ -219,8 +254,8 @@ describe("TimerStage", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /ændr indstillinger/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /optag forsøget/i }));
-    fireEvent.click(screen.getByRole("button", { name: /gå til start/i }));
 
     expect(await screen.findByText(/video kræver https/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /start timeren/i })).toBeEnabled();
@@ -246,8 +281,8 @@ describe("TimerStage", () => {
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /ændr indstillinger/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /optag forsøget/i }));
-    fireEvent.click(screen.getByRole("button", { name: /gå til start/i }));
 
     await waitFor(() => expect(getUserMedia).toHaveBeenCalledWith({ video: { facingMode: "environment" }, audio: false }));
     const switchButton = await screen.findByRole("button", { name: /skift til frontkamera/i });

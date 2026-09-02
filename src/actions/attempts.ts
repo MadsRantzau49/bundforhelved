@@ -116,6 +116,23 @@ export async function changeAttemptScope(
   }
 }
 
+export async function changeAttemptCategory(
+  attemptId: string,
+  categoryId: string,
+): Promise<ActionResult<Attempt>> {
+  try {
+    const attempt = uuidSchema.parse(attemptId);
+    const category = uuidSchema.parse(categoryId);
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.rpc("change_attempt_category", { attempt, category });
+    if (error) throw error;
+    revalidatePath("/timer");
+    return { ok: true, data: data as Attempt };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Kategorien kunne ikke ændres.") };
+  }
+}
+
 const evidenceExtensions: Record<string, string> = {
   "video/mp4": "mp4",
   "video/webm": "webm",

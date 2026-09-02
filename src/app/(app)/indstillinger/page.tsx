@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Settings, ShieldCheck } from "lucide-react";
+import { BookOpenText, ChevronRight, Handshake, Settings, ShieldCheck, UsersRound } from "lucide-react";
 import { NotificationSettings } from "@/components/notification-settings";
 import { PageHeader } from "@/components/page-header";
 import { ProfileGuestAccess } from "@/components/profile-guest-access";
@@ -38,6 +38,17 @@ export default async function SettingsPage() {
         description="Styr notifikationer, enheder og kontooplysninger. Din profilside viser kun dine statistikker."
         action={<span className="header-clan"><Settings aria-hidden="true" /></span>}
       />
+
+      <section className="settings-navigation" aria-labelledby="settings-navigation-title">
+        <div className="section-heading">
+          <div><p className="eyebrow">Flere funktioner</p><h2 id="settings-navigation-title">Genveje</h2></div>
+        </div>
+        <div className="settings-navigation__links">
+          <Link href="/venner"><Handshake aria-hidden="true" /><span><strong>Venner</strong><small>Find venner og svar på anmodninger</small></span><ChevronRight aria-hidden="true" /></Link>
+          <Link href="/klaner"><UsersRound aria-hidden="true" /><span><strong>Klaner</strong><small>Tilmeld dig og administrer dine klaner</small></span><ChevronRight aria-hidden="true" /></Link>
+          <Link href="/guide"><BookOpenText aria-hidden="true" /><span><strong>Guide</strong><small>Se regler og instruktioner til kategorierne</small></span><ChevronRight aria-hidden="true" /></Link>
+        </div>
+      </section>
 
       <NotificationSettings
         initialPreferences={(preferencesResult.data as NotificationPreferences | null) ?? defaultPreferences}

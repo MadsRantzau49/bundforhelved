@@ -45,7 +45,7 @@ export function AppShell({
         </div>
       </header>
       <main className="app-main">{children}</main>
-      <BottomNav friendAttentionCount={badges.peer_reviews + badges.friend_requests} />
+      <BottomNav reviewCount={badges.peer_reviews} />
     </div>
   );
 }
