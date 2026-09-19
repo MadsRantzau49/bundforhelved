@@ -180,6 +180,30 @@ describe("TimerStage", () => {
     await waitFor(() => expect(startAttempt).toHaveBeenCalledWith(category.id, null, host.player_id));
   });
 
+  it("uses changed settings immediately without an apply button", async () => {
+    vi.mocked(startAttempt).mockResolvedValue({
+      ok: true,
+      data: { attempt: attempt({ category_id: secondCategory.id }), live_elapsed_ms: 0 },
+    });
+    render(
+      <TimerStage
+        categories={[category, secondCategory]}
+        initialAttempt={null}
+        attemptCategory={null}
+        initialElapsedMs={0}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /ændr indstillinger/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /krus/i }));
+
+    expect(screen.queryByRole("button", { name: /brug denne opsætning/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /start timeren/i }));
+    await waitFor(() => expect(startAttempt).toHaveBeenCalledWith(secondCategory.id, null, host.player_id));
+  });
+
   it("returns directly to a ready timer after submitting a stopped attempt", async () => {
     vi.mocked(confirmAttempt).mockResolvedValue({
       ok: true,

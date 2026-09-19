@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useRef, useState, useTransition } from "react";
 import {
   Award,
   ChevronDown,
@@ -19,6 +19,7 @@ import {
   adminUpdateAttemptAction,
   createCategoryAction,
   deleteUserAction,
+  listAdminAttemptsAction,
   resetUserPasswordAction,
   setUserAdminAction,
   toggleCategoryAction,
@@ -31,32 +32,7 @@ import { FormMessage, SubmitButton } from "@/components/form-controls";
 import { achievementMediaUrl } from "@/lib/achievement-media";
 import { achievementDefinitions } from "@/lib/achievements";
 import { formatDate, formatTime } from "@/lib/format";
-import type { AchievementAsset, AttemptStatus, Category, Profile } from "@/types/app";
-
-export type AdminAttempt = {
-  id: string;
-  user_id: string;
-  recorded_by: string | null;
-  category_id: string;
-  clan_id: string | null;
-  elapsed_ms: number;
-  stopped_at: string;
-  confirmed_at: string | null;
-  submitted_for_review_at: string | null;
-  reviewed_at: string | null;
-  status: Exclude<AttemptStatus, "running">;
-  invalidated_reason: string | null;
-  profiles: Pick<Profile, "id" | "username" | "avatar_path">;
-  recorder: Pick<Profile, "id" | "username"> | null;
-  categories: Pick<Category, "id" | "name" | "icon_key" | "accent_color">;
-  clans: { id: string; name: string } | null;
-};
-
-export type AdminClan = {
-  id: string;
-  name: string;
-  clan_members: { user_id: string }[];
-};
+import type { AchievementAsset, AdminAttempt, AdminAttemptPage, AdminClan, Category, Profile } from "@/types/app";
 
 const statusText: Record<AdminAttempt["status"], string> = {
   awaiting_confirmation: "Ikke indsendt",
@@ -73,7 +49,7 @@ function CategoryEditor({
 }: {
   category: Category;
   pending: boolean;
-  run: (action: () => Promise<{ ok: boolean; error?: string }>, success: string) => void;
+  run: (action: () => Promise<{ ok: boolean; error?: string }>, success: string, refreshAttempts?: boolean) => void;
 }) {
   return (
     <details className="admin-category-editor">
@@ -124,7 +100,7 @@ function AttemptEditor({
   categories: Category[];
   clans: AdminClan[];
   pending: boolean;
-  run: (action: () => Promise<{ ok: boolean; error?: string }>, success: string) => void;
+  run: (action: () => Promise<{ ok: boolean; error?: string }>, success: string, refreshAttempts?: boolean) => void;
 }) {
   const [playerId, setPlayerId] = useState(attempt.user_id);
   const [clanId, setClanId] = useState(attempt.clan_id ?? "");
@@ -154,7 +130,7 @@ function AttemptEditor({
         <button
           className={decision === "invalid" ? "button button--danger admin-attempt__save" : "button button--primary admin-attempt__save"}
           disabled={pending || !Number.isFinite(Number(seconds)) || Number(seconds) < 0}
-          onClick={() => run(() => adminUpdateAttemptAction({ attemptId: attempt.id, playerId, categoryId, clanId: clanId || null, elapsedMs: Math.round(Number(seconds) * 1000), valid: decision === "keep" ? null : decision === "valid", reason }), decision === "keep" ? "Tiden er rettet uden statusskift." : decision === "valid" ? "Tiden er rettet og bekræftet." : "Tiden er rettet og markeret ugyldig.")}
+          onClick={() => run(() => adminUpdateAttemptAction({ attemptId: attempt.id, playerId, categoryId, clanId: clanId || null, elapsedMs: Math.round(Number(seconds) * 1000), valid: decision === "keep" ? null : decision === "valid", reason }), decision === "keep" ? "Tiden er rettet uden statusskift." : decision === "valid" ? "Tiden er rettet og bekræftet." : "Tiden er rettet og markeret ugyldig.", true)}
         ><Save aria-hidden="true" /> Gem hele tiden</button>
       </div>
     </details>
@@ -195,14 +171,14 @@ function AchievementImageEditor({
 export function AdminDashboard({
   categories,
   users,
-  attempts,
+  initialAttemptPage,
   clans,
   achievementAssets,
   currentUserId,
 }: {
   categories: Category[];
   users: Profile[];
-  attempts: AdminAttempt[];
+  initialAttemptPage: AdminAttemptPage;
   clans: AdminClan[];
   achievementAssets: AchievementAsset[];
   currentUserId: string;
@@ -211,27 +187,87 @@ export function AdminDashboard({
   const [message, setMessage] = useState<string>();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
+  const [attempts, setAttempts] = useState(initialAttemptPage.attempts);
+  const [attemptTotal, setAttemptTotal] = useState(initialAttemptPage.total);
+  const [attemptHasMore, setAttemptHasMore] = useState(initialAttemptPage.hasMore);
+  const [attemptCursor, setAttemptCursor] = useState(initialAttemptPage.nextCursor);
   const [pending, startTransition] = useTransition();
+  const [attemptsLoading, startAttemptsTransition] = useTransition();
+  const attemptRequest = useRef(0);
+  const filtersReady = useRef(false);
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
+  useEffect(() => {
+    if (!filtersReady.current) {
+      filtersReady.current = true;
+      return;
+    }
+
+    const request = ++attemptRequest.current;
+    const timeout = window.setTimeout(() => {
+      startAttemptsTransition(async () => {
+        const result = await listAdminAttemptsAction(query, status, null);
+        if (request !== attemptRequest.current) return;
+        if (!result.ok) {
+          setMessage(result.error);
+          return;
+        }
+        setAttempts(result.data.attempts);
+        setAttemptTotal(result.data.total);
+        setAttemptHasMore(result.data.hasMore);
+        setAttemptCursor(result.data.nextCursor);
+      });
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [query, status]);
+
+  function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string, refreshAttempts = false) {
+    const refreshRequest = refreshAttempts ? ++attemptRequest.current : null;
+    const refreshQuery = query;
+    const refreshStatus = status;
     setMessage(undefined);
     startTransition(async () => {
       try {
         const result = await action();
         setMessage(result.ok ? success : result.error ?? "Handlingen mislykkedes.");
+        if (result.ok && refreshAttempts) {
+          const page = await listAdminAttemptsAction(refreshQuery, refreshStatus, null);
+          if (refreshRequest !== attemptRequest.current) return;
+          if (!page.ok) {
+            setMessage(`${success} Genindlæs siden for at se ændringen i listen.`);
+            return;
+          }
+          setAttempts(page.data.attempts);
+          setAttemptTotal(page.data.total);
+          setAttemptHasMore(page.data.hasMore);
+          setAttemptCursor(page.data.nextCursor);
+        }
       } catch {
         setMessage("Forbindelsen til serveren røg. Prøv igen.");
       }
     });
   }
 
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredAttempts = attempts.filter((attempt) => {
-    const matchesStatus = status === "all" || attempt.status === status;
-    const haystack = `${attempt.profiles.username} ${attempt.categories.name} ${attempt.clans?.name ?? "global"} ${attempt.id}`.toLowerCase();
-    return matchesStatus && (!normalizedQuery || haystack.includes(normalizedQuery));
-  });
   const achievementArtwork = new Map(achievementAssets.map((asset) => [asset.achievement_key, asset.image_path]));
+
+  function loadMoreAttempts() {
+    if (!attemptCursor) return;
+    const request = ++attemptRequest.current;
+    startAttemptsTransition(async () => {
+      const result = await listAdminAttemptsAction(query, status, attemptCursor);
+      if (request !== attemptRequest.current) return;
+      if (!result.ok) {
+        setMessage(result.error);
+        return;
+      }
+      setAttempts((current) => {
+        const known = new Set(current.map((attempt) => attempt.id));
+        return [...current, ...result.data.attempts.filter((attempt) => !known.has(attempt.id))];
+      });
+      setAttemptTotal(result.data.total);
+      setAttemptHasMore(result.data.hasMore);
+      setAttemptCursor(result.data.nextCursor);
+    });
+  }
 
   return (
     <div className="admin-dashboard">
@@ -257,9 +293,10 @@ export function AdminDashboard({
       </section>
 
       <section className="admin-section" id="tider">
-        <div className="admin-section__header"><div><p className="eyebrow">Dommerbordet</p><h2>Alle registrerede tider</h2><p>Søg og ret spiller, kategori, klan, varighed og gyldighed.</p></div><span>{filteredAttempts.length} af {attempts.length}</span></div>
-        <div className="admin-filters"><label><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Søg bruger, kategori, klan eller ID" /></label><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Alle statusser</option><option value="awaiting_confirmation">Ikke indsendt</option><option value="pending_review">Afventer review</option><option value="approved">Bekræftet</option><option value="declined">Afvist</option><option value="invalidated">Ugyldig</option></select></div>
-        <div className="admin-table">{filteredAttempts.length ? filteredAttempts.map((attempt) => <AttemptEditor key={attempt.id} attempt={attempt} users={users} categories={categories} clans={clans} pending={pending} run={run} />) : <div className="inline-empty">Ingen tider matcher filtrene.</div>}</div>
+        <div className="admin-section__header"><div><p className="eyebrow">Dommerbordet</p><h2>Alle registrerede tider</h2><p>Søg og ret spiller, kategori, klan, varighed og gyldighed.</p></div><span>{attempts.length} af {attemptTotal}</span></div>
+        <div className="admin-filters"><label><Search aria-hidden="true" /><input value={query} onChange={(event) => { setAttemptHasMore(false); setQuery(event.target.value); }} placeholder="Søg bruger, kategori, klan eller ID" /></label><select value={status} onChange={(event) => { setAttemptHasMore(false); setStatus(event.target.value); }}><option value="all">Alle statusser</option><option value="awaiting_confirmation">Ikke indsendt</option><option value="pending_review">Afventer review</option><option value="approved">Bekræftet</option><option value="declined">Afvist</option><option value="invalidated">Ugyldig</option></select></div>
+        <div className="admin-table">{attempts.length ? attempts.map((attempt) => <AttemptEditor key={attempt.id} attempt={attempt} users={users} categories={categories} clans={clans} pending={pending} run={run} />) : <div className="inline-empty">{attemptsLoading ? "Henter tider..." : "Ingen tider matcher filtrene."}</div>}</div>
+        {attemptHasMore && attemptCursor && <button className="button button--ghost admin-load-more" type="button" disabled={attemptsLoading} onClick={loadMoreAttempts}>{attemptsLoading ? "Henter..." : "Indlæs flere tider"}</button>}
       </section>
 
       <section className="admin-section" id="brugere">

@@ -99,14 +99,17 @@ export function calculateAchievements(
 
   for (const attempt of approved) {
     const day = attemptDateKey(attempt);
-    perDay.set(day, [...(perDay.get(day) ?? []), attempt]);
+    const attemptsForDay = perDay.get(day) ?? [];
+    attemptsForDay.push(attempt);
+    perDay.set(day, attemptsForDay);
     perCategory.set(attempt.category_id, (perCategory.get(attempt.category_id) ?? 0) + 1);
   }
 
   const dayAttempts = [...perDay.values()];
   const categoryTarget = Math.max(1, activeCategoryIds.length);
+  const activeCategories = new Set(activeCategoryIds);
   const attemptedActiveCategories = new Set(
-    approved.filter((attempt) => activeCategoryIds.includes(attempt.category_id)).map((attempt) => attempt.category_id),
+    approved.filter((attempt) => activeCategories.has(attempt.category_id)).map((attempt) => attempt.category_id),
   ).size;
   const metrics: Record<string, number> = {
     total: approved.length,
