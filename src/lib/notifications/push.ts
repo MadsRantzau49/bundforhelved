@@ -50,16 +50,23 @@ export async function deliverPendingPushNotifications(userIds?: string[]) {
       .select("id, user_id, endpoint, p256dh, auth")
       .in("user_id", recipientIds);
     if (subscriptionError) return;
-    const subscriptions = (subscriptionData ?? []) as StoredSubscription[];
+    const subscriptionsByUser = new Map<string, StoredSubscription[]>();
+    for (const subscription of (subscriptionData ?? []) as StoredSubscription[]) {
+      const subscriptions = subscriptionsByUser.get(subscription.user_id) ?? [];
+      subscriptions.push(subscription);
+      subscriptionsByUser.set(subscription.user_id, subscriptions);
+    }
+    const deliveredIds: string[] = [];
+    const staleSubscriptionIds = new Set<string>();
 
-    for (const notification of notifications) {
-      const recipientSubscriptions = subscriptions.filter(
-        (subscription) => subscription.user_id === notification.user_id,
-      );
+    for (let from = 0; from < notifications.length; from += 10) {
+      const batch = notifications.slice(from, from + 10);
+      await Promise.all(batch.map(async (notification) => {
+      const recipientSubscriptions = subscriptionsByUser.get(notification.user_id) ?? [];
       let delivered = recipientSubscriptions.length === 0;
       let retryNeeded = false;
 
-      for (const subscription of recipientSubscriptions) {
+      await Promise.all(recipientSubscriptions.map(async (subscription) => {
         const pushSubscription: WebPushSubscription = {
           endpoint: subscription.endpoint,
           keys: { p256dh: subscription.p256dh, auth: subscription.auth },
@@ -77,20 +84,28 @@ export async function deliverPendingPushNotifications(userIds?: string[]) {
             ? Number(error.statusCode)
             : 0;
           if (statusCode === 404 || statusCode === 410) {
-            await admin.from("push_subscriptions").delete().eq("id", subscription.id);
+            staleSubscriptionIds.add(subscription.id);
           } else {
             retryNeeded = true;
           }
         }
-      }
+      }));
 
       if (delivered || !retryNeeded) {
-        await admin
-          .from("notifications")
-          .update({ push_sent_at: new Date().toISOString() })
-          .eq("id", notification.id)
-          .is("push_sent_at", null);
+        deliveredIds.push(notification.id);
       }
+      }));
+    }
+
+    if (staleSubscriptionIds.size) {
+      await admin.from("push_subscriptions").delete().in("id", [...staleSubscriptionIds]);
+    }
+    if (deliveredIds.length) {
+      await admin
+        .from("notifications")
+        .update({ push_sent_at: new Date().toISOString() })
+        .in("id", deliveredIds)
+        .is("push_sent_at", null);
     }
   } catch {
     // Push delivery is best-effort; the persistent in-app notification remains available.

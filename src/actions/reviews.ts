@@ -1,12 +1,28 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireProfile } from "@/lib/auth/session";
 import { getErrorText } from "@/lib/errors";
 import { deliverPendingPushNotifications } from "@/lib/notifications/push";
+import { getPeerReviewPage } from "@/lib/peer-reviews";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { uuidSchema } from "@/lib/validation";
-import type { ActionResult } from "@/types/app";
+import type { ActionResult, PeerReviewPage } from "@/types/app";
+
+export async function listPeerReviewAttemptsAction(
+  cursor: PeerReviewPage["nextCursor"],
+): Promise<ActionResult<PeerReviewPage>> {
+  await requireProfile();
+  if (cursor && (!uuidSchema.safeParse(cursor.id).success || !Number.isFinite(Date.parse(cursor.submittedAt)))) {
+    return { ok: false, error: "Siden er ugyldig." };
+  }
+  try {
+    return { ok: true, data: await getPeerReviewPage(cursor) };
+  } catch {
+    return { ok: false, error: "Flere tider kunne ikke hentes." };
+  }
+}
 
 export async function reviewAttemptAction(
   attemptId: string,
@@ -25,7 +41,7 @@ export async function reviewAttemptAction(
     revalidatePath("/rangliste");
     revalidatePath("/profil");
     revalidatePath("/admin");
-    if (approve) await deliverPendingPushNotifications();
+    if (approve) after(() => deliverPendingPushNotifications());
     return { ok: true, data: undefined };
   } catch (error) {
     const message = getErrorText(error).toLowerCase();

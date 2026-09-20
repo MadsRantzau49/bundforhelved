@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireProfile } from "@/lib/auth/session";
 import { getErrorText } from "@/lib/errors";
 import { deliverPendingPushNotifications } from "@/lib/notifications/push";
@@ -44,7 +45,8 @@ export async function sendFriendRequestAction(usernameValue: string, expectedUse
     const { error } = await supabase.rpc("request_friend", { target_username });
     if (error) throw error;
     refreshFriendPages();
-    if (targetResult.data?.id) await deliverPendingPushNotifications([targetResult.data.id]);
+    const targetId = targetResult.data?.id;
+    if (targetId) after(() => deliverPendingPushNotifications([targetId]));
     return { ok: true, data: undefined };
   } catch (error) {
     return { ok: false, error: friendError(error, "Venneanmodningen kunne ikke sendes.") };
@@ -72,7 +74,7 @@ export async function pingFriendForReviewAction(friendId: string): Promise<Actio
     const { data, error } = await supabase.rpc("ping_friend_for_review", { friend });
     if (error) throw error;
     if (!data) return { ok: false, error: "Du har allerede pinget denne ven om tiden." };
-    await deliverPendingPushNotifications([friend]);
+    after(() => deliverPendingPushNotifications([friend]));
     return { ok: true, data: true };
   } catch (error) {
     const message = getErrorText(error).toLowerCase();

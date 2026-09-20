@@ -1187,6 +1187,7 @@ h1, h2, h3 {
 .admin-attempt[open] .admin-time-row > svg { transform: rotate(180deg); }
 .admin-attempt__meta { margin: 0; overflow-wrap: anywhere; color: var(--dim); font-size: 0.52rem; }
 .admin-attempt__save { width: 100%; }
+.admin-load-more { width: 100%; margin-top: 0.8rem; }
 .admin-achievement-grid { display: grid; gap: 0.55rem; }
 .admin-achievement { padding: 0.7rem; display: grid; grid-template-columns: 3.8rem minmax(0, 1fr) auto; align-items: center; gap: 0.65rem; border: 1px solid var(--line); border-radius: 0.8rem; background: var(--panel); }
 .admin-achievement__preview { width: 3.8rem; height: 3.8rem; display: grid; place-items: center; border: 1px solid rgba(245,169,0,0.2); border-radius: 0.7rem; background-color: rgba(245,169,0,0.045); background-position: center; background-size: cover; color: var(--amber); }

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireAdmin } from "@/lib/auth/session";
 import { providerPassword } from "@/lib/auth/credentials";
 import { errorMessage } from "@/lib/errors";
@@ -9,7 +10,8 @@ import { deliverPendingPushNotifications } from "@/lib/notifications/push";
 import { achievementDefinitions } from "@/lib/achievements";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formString, uuidSchema } from "@/lib/validation";
-import type { ActionResult, FormState } from "@/types/app";
+import { getAdminAttemptPage } from "@/lib/admin-attempts";
+import type { ActionResult, AdminAttemptPage, FormState } from "@/types/app";
 
 const colorPattern = /^#[0-9A-Fa-f]{6}$/;
 const iconPattern = /^[a-z0-9][a-z0-9_-]{0,49}$/;
@@ -24,6 +26,27 @@ const mediaExtensions: Record<string, string> = {
   "video/quicktime": "mov",
 };
 const achievementKeys = new Set(achievementDefinitions.map((achievement) => achievement.key));
+const attemptStatuses = new Set(["awaiting_confirmation", "pending_review", "approved", "declined", "invalidated"]);
+
+export async function listAdminAttemptsAction(
+  queryValue: string,
+  statusValue: string,
+  cursor: AdminAttemptPage["nextCursor"],
+): Promise<ActionResult<AdminAttemptPage>> {
+  await requireAdmin();
+  const query = queryValue.trim();
+  const status = statusValue === "all" ? null : statusValue;
+  if (query.length > 100
+      || (status && !attemptStatuses.has(status))
+      || (cursor && (!uuidSchema.safeParse(cursor.id).success || !Number.isFinite(Date.parse(cursor.stoppedAt))))) {
+    return { ok: false, error: "Filtrene er ugyldige." };
+  }
+  try {
+    return { ok: true, data: await getAdminAttemptPage({ query, status, cursor }) };
+  } catch {
+    return { ok: false, error: "Tiderne kunne ikke hentes." };
+  }
+}
 
 export async function saveBattleRankAction(formData: FormData): Promise<ActionResult> {
   await requireAdmin();
@@ -341,7 +364,7 @@ export async function adminUpdateAttemptAction(input: AdminAttemptUpdateInput): 
     revalidatePath("/profil");
     revalidatePath("/peer-review");
     revalidatePath("/venner");
-    if (input.valid === true) await deliverPendingPushNotifications();
+    if (input.valid === true) after(() => deliverPendingPushNotifications());
     return { ok: true, data: undefined };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Tiden kunne ikke opdateres.") };

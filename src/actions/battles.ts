@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { requireProfile } from "@/lib/auth/session";
 import { loadBattleHub } from "@/lib/battles";
 import { errorMessage } from "@/lib/errors";
@@ -37,7 +38,7 @@ export async function createBattleAction(
     });
     if (error) throw error;
     revalidatePath("/battle");
-    await deliverPendingPushNotifications();
+    after(() => deliverPendingPushNotifications());
     return refreshedHub(profile.id);
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Invitationen kunne ikke sendes.") };
@@ -93,6 +94,7 @@ export async function stopBattleAction(battleId: string): Promise<ActionResult<B
     revalidatePath("/profil");
     revalidatePath("/rangliste");
     revalidatePath("/admin");
+    after(() => deliverPendingPushNotifications());
     return refreshedHub(profile.id);
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Kampen kunne ikke stoppes.") };
@@ -114,7 +116,7 @@ export async function reviewBattleTimeAction(battleId: string, approve: boolean)
     revalidatePath("/rangliste");
     revalidatePath("/peer-review");
     revalidatePath("/admin");
-    if (approve) await deliverPendingPushNotifications();
+    if (approve) after(() => deliverPendingPushNotifications());
     return refreshedHub(profile.id);
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Tiden kunne ikke bedømmes.") };

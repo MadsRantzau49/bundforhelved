@@ -91,6 +91,13 @@ export type PeerReviewAttempt = {
   evidence_video_url?: string | null;
 };
 
+export type PeerReviewPage = {
+  attempts: PeerReviewAttempt[];
+  total: number;
+  hasMore: boolean;
+  nextCursor: { submittedAt: string; id: string } | null;
+};
+
 export type Clan = {
   id: string;
   name: string;
@@ -182,6 +189,38 @@ export type FriendProfileData = {
 export type AchievementAsset = {
   achievement_key: string;
   image_path: string | null;
+};
+
+export type AdminAttempt = {
+  id: string;
+  user_id: string;
+  recorded_by: string | null;
+  category_id: string;
+  clan_id: string | null;
+  elapsed_ms: number;
+  stopped_at: string;
+  confirmed_at: string | null;
+  submitted_for_review_at: string | null;
+  reviewed_at: string | null;
+  status: Exclude<AttemptStatus, "running">;
+  invalidated_reason: string | null;
+  profiles: Pick<Profile, "id" | "username" | "avatar_path">;
+  recorder: Pick<Profile, "id" | "username"> | null;
+  categories: Pick<Category, "id" | "name" | "icon_key" | "accent_color">;
+  clans: { id: string; name: string } | null;
+};
+
+export type AdminClan = {
+  id: string;
+  name: string;
+  clan_members: { user_id: string }[];
+};
+
+export type AdminAttemptPage = {
+  attempts: AdminAttempt[];
+  total: number;
+  hasMore: boolean;
+  nextCursor: { stoppedAt: string; id: string } | null;
 };
 
 export type BattleRank = {

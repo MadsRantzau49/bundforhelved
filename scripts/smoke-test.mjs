@@ -562,8 +562,14 @@ try {
   const friendsPage = await request(`${appUrl}/venner`, {
     headers: { Cookie: owner.cookie },
   });
-  if (!friendsPage.includes("Peer review") || friendsPage.indexOf("Peer review") > friendsPage.indexOf("Tilføj en ven")) {
-    throw new Error("The Friends page did not render peer review before friend management.");
+  if (!friendsPage.includes("Tilføj en ven")) {
+    throw new Error("The Friends page did not render friend management.");
+  }
+  const peerReviewPage = await request(`${appUrl}/peer-review`, {
+    headers: { Cookie: owner.cookie },
+  });
+  if (!peerReviewPage.includes("Tider til godkendelse")) {
+    throw new Error("The peer review page did not render the review queue.");
   }
   const friendProfilePage = await request(`${appUrl}/venner/${observer.id}`, {
     headers: { Cookie: owner.cookie },

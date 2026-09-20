@@ -111,3 +111,60 @@ Gæsteadgang giver kun en anden konto lov til at betjene timeren og tilskrive et
 Projektet kan deployes direkte på Vercel. Tilføj alle værdier fra `.env.example` som production environment variables. Vercels commit-ID reviderer automatisk PWA-cachen. På andre platforme skal `NEXT_PUBLIC_APP_VERSION` ændres ved en deployment, der skal tvinge en ny cache. Service worker registreres kun i production builds, så cache ikke forstyrrer lokal udvikling.
 
 `SUPABASE_SERVICE_ROLE_KEY`, `AUTH_PASSWORD_PEPPER` og `VAPID_PRIVATE_KEY` er server-only og må aldrig eksponeres med `NEXT_PUBLIC_`.
+
+### Opdater en eksisterende produktions-RPi
+
+Kopiér ikke udviklingsdatabasen oven i en produktion, som allerede har rigtige data. Tag først backup, hent den nye kode, og lad migrationstjenesten anvende kun de nye migrationsfiler:
+
+```bash
+docker-compose --env-file .env.docker -f compose.yaml exec -T db \
+  pg_dump -U postgres -d postgres --format=custom --no-owner --no-acl \
+  > "bundforhelved-before-deploy.dump"
+
+git pull
+./scripts/docker.sh up
+./scripts/docker.sh test
+```
+
+`up` kontrollerer checksums for tidligere migrationer og anvender kun filer, som ikke allerede står i `public.app_schema_migrations`. En fejl stopper deploymenten i stedet for at fortsætte med et halvt opdateret skema.
+
+### Flyt hele installationen til en anden RPi
+
+En komplet flytning kræver både Postgres, Storage-filerne og den eksisterende `.env.docker`. Miljøfilen indeholder nøgler og `AUTH_PASSWORD_PEPPER`; uden den kan eksisterende login, JWT-nøgler og push-abonnementer ikke fortsætte korrekt.
+
+På den gamle RPi, mens stacken stadig kører:
+
+```bash
+docker-compose --env-file .env.docker -f compose.yaml exec -T db \
+  pg_dump -U postgres -d postgres --format=custom --no-owner --no-acl \
+  > bundforhelved.dump
+
+docker run --rm \
+  -v bund-forhelved_storage-data:/data:ro \
+  -v "$PWD":/backup \
+  alpine tar -czf /backup/bundforhelved-storage.tar.gz -C /data .
+
+chmod 600 .env.docker bundforhelved.dump bundforhelved-storage.tar.gz
+scp .env.docker bundforhelved.dump bundforhelved-storage.tar.gz bruger@produktion:/sti/til/bundforhelved/
+```
+
+På den nye RPi skal repository og de tre filer ligge i projektmappen. Start kun databasen, gendan dumpet og Storage-volumenet, og start derefter hele stacken:
+
+```bash
+docker-compose --env-file .env.docker -f compose.yaml up -d --wait db
+
+docker-compose --env-file .env.docker -f compose.yaml exec -T db \
+  pg_restore -U postgres -d postgres --clean --if-exists \
+  --no-owner --no-acl --exit-on-error < bundforhelved.dump
+
+docker volume create bund-forhelved_storage-data
+docker run --rm \
+  -v bund-forhelved_storage-data:/data \
+  -v "$PWD":/backup:ro \
+  alpine tar -xzf /backup/bundforhelved-storage.tar.gz -C /data
+
+./scripts/docker.sh up
+./scripts/docker.sh test
+```
+
+Kør kun restore på en tom ny installation: `--clean` erstatter indholdet i måldatabasen. Opdatér derefter URL-/HTTPS-værdier i `.env.docker`, hvis produktionsadressen er anderledes, men behold kryptografiske nøgler og `AUTH_PASSWORD_PEPPER` fra den gamle installation. Slet eller flyt backupfilerne fra projektmappen efter en vellykket kontrol, da de indeholder brugerdata og hemmeligheder.

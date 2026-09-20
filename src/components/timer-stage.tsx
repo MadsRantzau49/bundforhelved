@@ -810,7 +810,6 @@ export function TimerStage({
       </div>
 
       <label className="timer-record-option"><input type="checkbox" checked={recordEvidence} onChange={(event) => setRecordEvidence(event.target.checked)} /><Camera aria-hidden="true" /><span><strong>Optag forsøget</strong><small>Frivillig video til peer review</small></span></label>
-      <button className="button button--primary button--wide" type="button" onClick={() => setShowSettings(false)}><Check aria-hidden="true" /> Brug denne opsætning</button>
       </div>}
     </section>
   );
