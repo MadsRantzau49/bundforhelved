@@ -4,7 +4,7 @@ import { AdminDashboard } from "@/components/admin-dashboard";
 import { PageHeader } from "@/components/page-header";
 import { requireAdmin } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { AchievementAsset, Category, Profile } from "@/types/app";
+import type { AchievementAsset, BattleRank, Category, Profile } from "@/types/app";
 
 export const metadata: Metadata = { title: "Administration" };
 
@@ -25,7 +25,7 @@ export default async function AdminPage() {
       if ((result.data?.length ?? 0) < 1000) return { data: rows, error: null };
     }
   }
-  const [categoriesResult, usersResult, attemptsResult, clansResult, achievementAssetsResult] = await Promise.all([
+  const [categoriesResult, usersResult, attemptsResult, clansResult, achievementAssetsResult, battleRanksResult, battleRatingsResult] = await Promise.all([
     supabase
       .from("categories")
       .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
@@ -40,9 +40,11 @@ export default async function AdminPage() {
       .select("id, name, clan_members!clan_members_clan_id_fkey(user_id)")
       .order("name"),
     supabase.from("achievement_assets").select("achievement_key, image_path"),
+    supabase.from("battle_ranks").select("id, name, image_path, min_elo, max_elo, sort_order").order("min_elo"),
+    supabase.from("battle_ratings").select("user_id, elo, wins, losses, draws"),
   ]);
 
-  if (categoriesResult.error || usersResult.error || attemptsResult.error || clansResult.error || achievementAssetsResult.error) {
+  if (categoriesResult.error || usersResult.error || attemptsResult.error || clansResult.error || achievementAssetsResult.error || battleRanksResult.error || battleRatingsResult.error) {
     throw new Error("Administrationsdata kunne ikke hentes.");
   }
 
@@ -65,7 +67,7 @@ export default async function AdminPage() {
         <div><span><UsersRound aria-hidden="true" /></span><strong>{users.length}</strong><small>brugere</small></div>
         <div><span><ShieldCheck aria-hidden="true" /></span><strong>{categories.filter((category) => category.is_active).length}</strong><small>aktive kategorier</small></div>
       </div>
-      <AdminDashboard categories={categories} users={users} attempts={attempts} clans={clans} achievementAssets={achievementAssets} currentUserId={admin.id} />
+      <AdminDashboard categories={categories} users={users} attempts={attempts} clans={clans} achievementAssets={achievementAssets} battleRanks={(battleRanksResult.data ?? []) as BattleRank[]} battleRatings={battleRatingsResult.data ?? []} currentUserId={admin.id} />
     </div>
   );
 }

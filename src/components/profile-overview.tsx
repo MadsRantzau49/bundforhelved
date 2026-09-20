@@ -11,6 +11,7 @@ import {
   Hourglass,
   Medal,
   ShieldCheck,
+  Swords,
   Sparkles,
   TimerReset,
   Trophy,
@@ -20,7 +21,8 @@ import { CategoryIcon } from "@/components/category-icon";
 import { achievementMediaUrl } from "@/lib/achievement-media";
 import { attemptDateKey, calculateAchievements } from "@/lib/achievements";
 import { formatDate, formatTime } from "@/lib/format";
-import type { AchievementAsset, Profile, ProfileAttempt } from "@/types/app";
+import { rankMediaUrl } from "@/lib/rank-media";
+import type { AchievementAsset, BattleStanding, Profile, ProfileAttempt } from "@/types/app";
 
 function addDays(dateKey: string, days: number) {
   const date = new Date(`${dateKey}T12:00:00Z`);
@@ -78,12 +80,14 @@ export function ProfileOverview({
   attempts,
   achievementAssets = [],
   activeCategoryIds = [],
+  battleStanding,
   own = false,
 }: {
   profile: Profile;
   attempts: ProfileAttempt[];
   achievementAssets?: AchievementAsset[];
   activeCategoryIds?: string[];
+  battleStanding?: BattleStanding | null;
   own?: boolean;
 }) {
   const approvedAttempts = attempts.filter((attempt) => attempt.status === "approved");
@@ -127,7 +131,7 @@ export function ProfileOverview({
   const activeDays = new Set(
     approvedAttempts.map(attemptDateKey),
   ).size;
-  const achievements = calculateAchievements(attempts, activeCategoryIds);
+  const achievements = calculateAchievements(attempts, activeCategoryIds, battleStanding);
   const unlockedAchievements = achievements.filter((achievement) => achievement.unlocked).length;
   const artwork = new Map(achievementAssets.map((asset) => [asset.achievement_key, asset.image_path]));
   const dailyCounts = new Map<string, number>();
@@ -147,11 +151,21 @@ export function ProfileOverview({
       <section className="profile-hero">
         <div className="profile-hero__pattern" aria-hidden="true" />
         <Avatar username={profile.username} path={profile.avatar_path} size="hero" />
-        <p className="eyebrow">{own ? "Din spiller" : "Venneprofil"}</p>
+        <p className="eyebrow">{own ? "Din spiller" : "Spillerprofil"}</p>
         <h1>@{profile.username}</h1>
         <span className="profile-role">{profile.role === "admin" ? <><ShieldCheck aria-hidden="true" /> Admin</> : "Spiller"}</span>
         <p><CalendarDays aria-hidden="true" /> Med siden {formatDate(profile.created_at)}</p>
       </section>
+
+      {battleStanding && (
+        <section className="profile-battle-card">
+          <span className="profile-battle-card__rank" style={rankMediaUrl(battleStanding.rank_image_path) ? { backgroundImage: `url(${rankMediaUrl(battleStanding.rank_image_path)})` } : undefined}>
+            {!rankMediaUrl(battleStanding.rank_image_path) && <Swords aria-hidden="true" />}
+          </span>
+          <div><small>1v1-rang</small><strong>{battleStanding.rank_name ?? "Uden rang"}</strong><span>{battleStanding.wins} sejre · {battleStanding.losses} nederlag · {battleStanding.draws} uafgjorte</span></div>
+          {own && <b>{battleStanding.elo}<small>ELO</small></b>}
+        </section>
+      )}
 
       <section className="stats-strip">
         <div><Trophy aria-hidden="true" /><strong>{bests.length}</strong><span>personlige rekorder</span></div>
