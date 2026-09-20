@@ -1,4 +1,4 @@
-import type { ProfileAttempt } from "@/types/app";
+import type { BattleStanding, ProfileAttempt } from "@/types/app";
 
 export type AchievementRarity = "bronze" | "silver" | "gold" | "legendary";
 
@@ -50,6 +50,11 @@ export const achievementDefinitions: AchievementDefinition[] = [
   { key: "kategori-trippel", title: "Blandede bolsjer", description: "Sæt tider i 3 kategorier på samme dag.", metric: "dailyCategories", target: 3, rarity: "silver" },
   { key: "favoritdrikken", title: "Stamkunde", description: "Sæt 20 tider i den samme kategori.", metric: "categoryMax", target: 20, rarity: "gold" },
   { key: "kirsejohn-dobbelt", title: "Dobbelt Kirsejohn", description: "Sæt 2 Kirsejohn-tider på én dag. Den sagnomspundne prøve.", metric: "dailyKirsejohn", target: 2, rarity: "legendary" },
+  { key: "dueldebut", title: "Dueldebut", description: "Gennemfør din første 1v1-kamp.", metric: "battleTotal", target: 1, rarity: "bronze" },
+  { key: "foerste-duelsejr", title: "Første duelsejr", description: "Vind din første 1v1-kamp.", metric: "battleWins", target: 1, rarity: "bronze" },
+  { key: "fast-inventar", title: "Fast inventar", description: "Gennemfør 10 1v1-kampe.", metric: "battleTotal", target: 10, rarity: "silver" },
+  { key: "arenaens-mester", title: "Arenaens mester", description: "Vind 10 1v1-kampe.", metric: "battleWins", target: 10, rarity: "gold" },
+  { key: "duellegende", title: "Duellegende", description: "Vind 50 1v1-kampe.", metric: "battleWins", target: 50, rarity: "legendary" },
 ];
 
 const dateFormatter = new Intl.DateTimeFormat("en-CA", {
@@ -92,6 +97,7 @@ function maxInTenMinutes(attempts: ProfileAttempt[]) {
 export function calculateAchievements(
   attempts: ProfileAttempt[],
   activeCategoryIds: string[],
+  battleStanding?: Pick<BattleStanding, "wins" | "losses" | "draws"> | null,
 ): AchievementProgress[] {
   const approved = attempts.filter((attempt) => attempt.status === "approved");
   const perDay = new Map<string, ProfileAttempt[]>();
@@ -132,6 +138,8 @@ export function calculateAchievements(
     dailyCategories: Math.max(0, ...dayAttempts.map((items) => new Set(items.filter((attempt) => activeCategoryIds.includes(attempt.category_id)).map((attempt) => attempt.category_id)).size)),
     categoryMax: Math.max(0, ...perCategory.values()),
     dailyKirsejohn: Math.max(0, ...dayAttempts.map((items) => items.filter((attempt) => attempt.categories.name.toLocaleLowerCase("da").includes("kirsejohn")).length)),
+    battleTotal: (battleStanding?.wins ?? 0) + (battleStanding?.losses ?? 0) + (battleStanding?.draws ?? 0),
+    battleWins: battleStanding?.wins ?? 0,
   };
 
   return achievementDefinitions.map((definition) => {

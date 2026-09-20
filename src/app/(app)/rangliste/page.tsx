@@ -1,15 +1,16 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { BadgeCheck, Beer, Crown, Globe2, Handshake, Hourglass, Medal, Sparkles, Trophy, UsersRound } from "lucide-react";
+import { BadgeCheck, Beer, Crown, Globe2, Handshake, Hourglass, Medal, Shield, Sparkles, Trophy, UsersRound } from "lucide-react";
 import clsx from "clsx";
 import { Avatar } from "@/components/avatar";
 import { CategoryIcon } from "@/components/category-icon";
 import { PageHeader } from "@/components/page-header";
 import { requireProfile } from "@/lib/auth/session";
 import { formatTime } from "@/lib/format";
+import { rankMediaUrl } from "@/lib/rank-media";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Category, ClanMembership, DrinkDirectorEntry, LeaderboardEntry } from "@/types/app";
+import type { BattleRankLabel, Category, ClanMembership, DrinkDirectorEntry, LeaderboardEntry } from "@/types/app";
 
 export const metadata: Metadata = { title: "Rangliste" };
 
@@ -73,6 +74,11 @@ export default async function LeaderboardPage({
   }
 
   const visibleEntries = directorSelected ? directorEntries : entries;
+  const { data: rankData, error: rankError } = visibleEntries.length
+    ? await supabase.rpc("get_battle_rank_labels", { targets: visibleEntries.map((entry) => entry.user_id) })
+    : { data: [], error: null };
+  if (rankError) throw new Error("Kamprangene kunne ikke hentes.");
+  const battleRanks = new Map(((rankData ?? []) as BattleRankLabel[]).map((rank) => [rank.user_id, rank]));
   const currentEntry = visibleEntries.find((entry) => entry.user_id === profile.id);
   const hrefFor = ({
     categoryId = category?.id ?? null,
@@ -180,7 +186,7 @@ export default async function LeaderboardPage({
               if (!entry) return <div key={`empty-${visualIndex}`} className="podium__empty" />;
               const place = entry.rank;
               return (
-                <article key={entry.user_id} className={clsx("podium__place", `podium__place--${place}`)}>
+                <Link href={entry.user_id === profile.id ? "/profil" : `/spillere/${entry.user_id}`} key={entry.user_id} className={clsx("podium__place", `podium__place--${place}`)}>
                   {place === 1 && <Crown className="podium__crown" aria-hidden="true" />}
                   <Avatar username={entry.username} path={entry.avatar_path} size={place === 1 ? "hero" : "large"} rank={place} />
                    <span className="podium__rank">{place}</span>
@@ -191,7 +197,7 @@ export default async function LeaderboardPage({
                       <><b>{formatTime(entry.elapsed_ms)}<small>s</small></b><span className={entry.status === "approved" ? "leaderboard-status is-confirmed" : "leaderboard-status is-pending"}>{entry.status === "approved" ? <><BadgeCheck aria-hidden="true" /> Bekræftet{entry.reviewer_username && ` af @${entry.reviewer_username}`}</> : <><Hourglass aria-hidden="true" /> Ubekræftet</>}</span></>
                     )}
                   <div className="podium__block"><span>{place}</span></div>
-                </article>
+                </Link>
               );
             })}
           </section>
@@ -203,7 +209,8 @@ export default async function LeaderboardPage({
             </div>
             <div className="leaderboard-list">
               {visibleEntries.map((entry) => (
-                <article
+                <Link
+                  href={entry.user_id === profile.id ? "/profil" : `/spillere/${entry.user_id}`}
                   key={entry.user_id}
                   className={clsx("leaderboard-row", entry.user_id === profile.id && "is-current")}
                 >
@@ -212,15 +219,16 @@ export default async function LeaderboardPage({
                   </span>
                   <Avatar username={entry.username} path={entry.avatar_path} size="medium" />
                   <div className="leaderboard-row__person">
-                    <strong>{friendsOnly && entry.user_id !== profile.id ? <Link href={`/venner/${entry.user_id}`}>@{entry.username}</Link> : `@${entry.username}`}</strong>
+                    <strong>@{entry.username}</strong>
                     {"approved_count" in entry ? (
                       <small><BadgeCheck aria-hidden="true" /> Godkendte gennemførelser</small>
                     ) : (
                       <small>{entry.status === "approved" ? <><BadgeCheck aria-hidden="true" /> Bekræftet{entry.reviewer_username && ` af @${entry.reviewer_username}`}</> : <><Hourglass aria-hidden="true" /> Ubekræftet · afventer peer review</>}</small>
                     )}
                   </div>
+                  {battleRanks.get(entry.user_id) && <span aria-label={battleRanks.get(entry.user_id)?.rank_name ?? "Uden rang"} className="leaderboard-battle-rank" style={rankMediaUrl(battleRanks.get(entry.user_id)?.rank_image_path ?? null) ? { backgroundImage: `url(${rankMediaUrl(battleRanks.get(entry.user_id)?.rank_image_path ?? null)})` } : undefined}>{!rankMediaUrl(battleRanks.get(entry.user_id)?.rank_image_path ?? null) && <Shield aria-hidden="true" />}</span>}
                   {"approved_count" in entry ? <b>{entry.approved_count}<small>tider</small></b> : <b>{formatTime(entry.elapsed_ms)}<small>s</small></b>}
-                </article>
+                </Link>
               ))}
             </div>
           </section>

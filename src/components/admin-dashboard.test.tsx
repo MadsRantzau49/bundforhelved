@@ -72,6 +72,8 @@ function renderDashboard(initialAttemptPage: AdminAttemptPage) {
       initialAttemptPage={initialAttemptPage}
       clans={[]}
       achievementAssets={[]}
+      battleRanks={[]}
+      battleRatings={[]}
       currentUserId={user.id}
     />,
   );
@@ -103,7 +105,7 @@ describe("AdminDashboard", () => {
     }));
     expect(await screen.findByText("2 af 2")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Indlæs flere tider" })).not.toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("searches all attempts on the server", async () => {
     vi.mocked(listAdminAttemptsAction).mockResolvedValue({

@@ -48,6 +48,96 @@ export async function listAdminAttemptsAction(
   }
 }
 
+export async function saveBattleRankAction(formData: FormData): Promise<ActionResult> {
+  await requireAdmin();
+  const parsedId = formString(formData, "id") ? uuidSchema.safeParse(formString(formData, "id")) : null;
+  const name = formString(formData, "name").trim();
+  const minElo = Number(formString(formData, "minElo"));
+  const maxElo = Number(formString(formData, "maxElo"));
+  if (parsedId && !parsedId.success) return { ok: false, error: "Rangen er ugyldig." };
+  if (!name || name.length > 50) return { ok: false, error: "Navnet skal være mellem 1 og 50 tegn." };
+  if (!Number.isSafeInteger(minElo) || minElo < 0 || !Number.isSafeInteger(maxElo) || maxElo !== minElo + 99) {
+    return { ok: false, error: "Hver rang skal dække præcis 100 Elo-point." };
+  }
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const id = parsedId?.success ? parsedId.data : crypto.randomUUID();
+    const { data: current, error: readError } = await supabase.from("battle_ranks").select("image_path").eq("id", id).maybeSingle();
+    if (readError) throw readError;
+    const file = formData.get("image");
+    let imagePath = formData.get("removeImage") === "on" ? null : current?.image_path ?? null;
+    let uploadedPath: string | null = null;
+    if (file instanceof File && file.size > 0) {
+      const extension = mediaExtensions[file.type];
+      if (!extension || !file.type.startsWith("image/")) return { ok: false, error: "Billedets format understøttes ikke." };
+      if (file.size > 5 * 1024 * 1024) return { ok: false, error: "Billedet må højst fylde 5 MB." };
+      uploadedPath = `${id}/image-${Date.now()}.${extension}`;
+      const { error: uploadError } = await supabase.storage.from("rank-media").upload(uploadedPath, file, { contentType: file.type });
+      if (uploadError) throw uploadError;
+      imagePath = uploadedPath;
+    }
+
+    const { error } = await supabase.from("battle_ranks").upsert({
+      id,
+      name,
+      min_elo: minElo,
+      max_elo: maxElo,
+      sort_order: minElo,
+      image_path: imagePath,
+    });
+    if (error) {
+      if (uploadedPath) await supabase.storage.from("rank-media").remove([uploadedPath]);
+      throw error;
+    }
+    if (current?.image_path && current.image_path !== imagePath) await supabase.storage.from("rank-media").remove([current.image_path]);
+    revalidatePath("/admin");
+    revalidatePath("/battle");
+    revalidatePath("/profil");
+    revalidatePath("/rangliste");
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Rangen kunne ikke gemmes. Kontrollér at Elo-intervallerne ikke overlapper.") };
+  }
+}
+
+export async function deleteBattleRankAction(rankId: string): Promise<ActionResult> {
+  await requireAdmin();
+  try {
+    const id = uuidSchema.parse(rankId);
+    const supabase = await createSupabaseServerClient();
+    const { count, error: countError } = await supabase.from("battle_ranks").select("id", { count: "exact", head: true });
+    if (countError) throw countError;
+    if ((count ?? 0) <= 1) return { ok: false, error: "Der skal være mindst én rang." };
+    const { data, error } = await supabase.from("battle_ranks").delete().eq("id", id).select("image_path").single();
+    if (error) throw error;
+    if (data.image_path) await supabase.storage.from("rank-media").remove([data.image_path]);
+    revalidatePath("/admin");
+    revalidatePath("/battle");
+    revalidatePath("/profil");
+    revalidatePath("/rangliste");
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Rangen kunne ikke slettes.") };
+  }
+}
+
+export async function resetBattleEloAction(): Promise<ActionResult<number>> {
+  await requireAdmin();
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.rpc("admin_reset_battle_elo");
+    if (error) throw error;
+    revalidatePath("/admin");
+    revalidatePath("/battle");
+    revalidatePath("/profil");
+    revalidatePath("/rangliste");
+    return { ok: true, data: Number(data ?? 0) };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Elo kunne ikke nulstilles.") };
+  }
+}
+
 export async function createCategoryAction(
   _previousState: FormState,
   formData: FormData,

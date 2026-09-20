@@ -60,4 +60,13 @@ describe("calculateAchievements", () => {
 
     expect(progress.find((item) => item.key === "kirsejohn-dobbelt")).toMatchObject({ current: 2, unlocked: true });
   });
+
+  it("tracks completed 1v1 battles and wins", () => {
+    const progress = calculateAchievements([], [], { wins: 10, losses: 2, draws: 1 });
+
+    expect(progress.find((item) => item.key === "dueldebut")).toMatchObject({ current: 13, unlocked: true });
+    expect(progress.find((item) => item.key === "fast-inventar")).toMatchObject({ current: 13, unlocked: true });
+    expect(progress.find((item) => item.key === "arenaens-mester")).toMatchObject({ current: 10, unlocked: true });
+    expect(progress.find((item) => item.key === "duellegende")).toMatchObject({ current: 10, unlocked: false });
+  });
 });

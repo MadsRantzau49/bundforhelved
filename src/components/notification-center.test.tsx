@@ -62,4 +62,15 @@ describe("NotificationCenter", () => {
     expect(screen.getByText("Ingen notifikationer endnu.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Notifikationer" })).toBeInTheDocument();
   });
+
+  it("closes when pressing outside the notification center", () => {
+    render(<NotificationCenter initialNotifications={[notification]} initialUnread={1} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /1 ulæste/i }));
+    expect(screen.getByRole("region", { name: "Notifikationer" })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole("region", { name: "Notifikationer" })).not.toBeInTheDocument();
+  });
 });
