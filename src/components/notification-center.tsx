@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, CheckCheck, Trash2, Trophy, UserPlus, X } from "lucide-react";
 import clsx from "clsx";
@@ -23,6 +23,7 @@ export function NotificationCenter({
   const [unread, setUnread] = useState(initialUnread);
   const [message, setMessage] = useState<string>();
   const [pending, startTransition] = useTransition();
+  const centerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const refresh = () => router.refresh();
@@ -38,6 +39,15 @@ export function NotificationCenter({
       navigator.serviceWorker?.removeEventListener("message", onWorkerMessage);
     };
   }, [router]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!centerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
 
   function markRead(ids: string[]) {
     if (!ids.length) return;
@@ -82,7 +92,7 @@ export function NotificationCenter({
   }
 
   return (
-    <div className="notification-center">
+    <div className="notification-center" ref={centerRef}>
       <button
         type="button"
         className="icon-button notification-center__trigger"

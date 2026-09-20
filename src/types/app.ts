@@ -184,6 +184,85 @@ export type AchievementAsset = {
   image_path: string | null;
 };
 
+export type BattleRank = {
+  id: string;
+  name: string;
+  image_path: string | null;
+  min_elo: number;
+  max_elo: number;
+  sort_order: number;
+};
+
+export type BattleStanding = {
+  user_id: string;
+  elo: number | null;
+  wins: number;
+  losses: number;
+  draws: number;
+  rank_id: string | null;
+  rank_name: string | null;
+  rank_image_path: string | null;
+  rank_min_elo: number | null;
+  rank_max_elo: number | null;
+};
+
+export type BattleRankLabel = {
+  user_id: string;
+  rank_name: string | null;
+  rank_image_path: string | null;
+};
+
+export type BattleStatus = "pending" | "ready" | "countdown" | "active" | "completed" | "declined" | "cancelled";
+
+export type BattleParticipant = {
+  user_id: string;
+  accepted_at: string | null;
+  finished_at: string | null;
+  elapsed_ms: number | null;
+  attempt_id: string | null;
+  elo_before: number | null;
+  elo_after: number | null;
+  elo_change: number | null;
+  rank_before_name: string | null;
+  rank_before_image_path: string | null;
+  rank_after_name: string | null;
+  rank_after_image_path: string | null;
+  attempt: { id: string; status: AttemptStatus } | null;
+};
+
+export type Battle = {
+  id: string;
+  challenger_id: string;
+  opponent_id: string;
+  category_id: string;
+  clan_id: string | null;
+  status: BattleStatus;
+  starts_at: string | null;
+  provisional_winner_id: string | null;
+  winner_id: string | null;
+  settled_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  challenger: Pick<Profile, "id" | "username" | "avatar_path">;
+  opponent: Pick<Profile, "id" | "username" | "avatar_path">;
+  category: Pick<Category, "id" | "name" | "icon_key" | "accent_color" | "image_path">;
+  clan: Pick<Clan, "id" | "name" | "image_path"> | null;
+  participants: BattleParticipant[];
+};
+
+export type BattleHub = {
+  current: Battle | null;
+  invitations: Battle[];
+  review_matches: Battle[];
+  history: Battle[];
+  standing: BattleStanding | null;
+  has_active_timer: boolean;
+};
+
+export type BattleClan = Pick<Clan, "id" | "name" | "image_path"> & {
+  member_ids: string[];
+};
+
 export type SocialBadges = {
   friend_requests: number;
   peer_reviews: number;
@@ -192,7 +271,7 @@ export type SocialBadges = {
 
 export type SocialNotification = {
   notification_id: string;
-  type: "friend_request" | "peer_review_ping" | "leaderboard_top3";
+  type: "friend_request" | "peer_review_ping" | "leaderboard_top3" | "battle_invite" | "battle_review";
   title: string;
   body: string;
   url: string;

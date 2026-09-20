@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { ProfileOverview } from "@/components/profile-overview";
 import { requireProfile } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { AchievementAsset, ProfileAttempt } from "@/types/app";
+import type { AchievementAsset, BattleStanding, ProfileAttempt } from "@/types/app";
 
 export const metadata: Metadata = { title: "Statistikker" };
 
@@ -30,7 +30,7 @@ export default async function ProfilePage() {
       if ((result.data?.length ?? 0) < 1000) return { data: rows, error: null };
     }
   }
-  const [attemptsResult, membershipsResult, categoriesResult, assetsResult] = await Promise.all([
+  const [attemptsResult, membershipsResult, categoriesResult, assetsResult, standingResult] = await Promise.all([
     getAllAttempts(),
     supabase
       .from("clan_members")
@@ -38,9 +38,10 @@ export default async function ProfilePage() {
       .eq("user_id", profile.id),
     supabase.from("categories").select("id").eq("is_active", true),
     supabase.from("achievement_assets").select("achievement_key, image_path"),
+    supabase.rpc("get_battle_standing", { target: profile.id }).maybeSingle(),
   ]);
 
-  if (attemptsResult.error || membershipsResult.error || categoriesResult.error || assetsResult.error) {
+  if (attemptsResult.error || membershipsResult.error || categoriesResult.error || assetsResult.error || standingResult.error) {
     throw new Error("Profildata kunne ikke hentes.");
   }
 
@@ -58,6 +59,7 @@ export default async function ProfilePage() {
         attempts={attempts}
         achievementAssets={(assetsResult.data ?? []) as AchievementAsset[]}
         activeCategoryIds={(categoriesResult.data ?? []).map((category) => category.id)}
+        battleStanding={(standingResult.data as BattleStanding | null) ?? null}
         own
       />
     </div>

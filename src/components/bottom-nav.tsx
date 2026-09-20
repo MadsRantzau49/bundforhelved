@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CircleUserRound, ScanSearch, TimerReset, Trophy } from "lucide-react";
+import { CircleUserRound, ScanSearch, Swords, TimerReset, Trophy } from "lucide-react";
 import clsx from "clsx";
 import { useConnectionStatus } from "@/lib/connection-status";
 
 const links = [
   { href: "/timer", label: "Tag tid", icon: TimerReset },
+  { href: "/battle", label: "1v1", icon: Swords },
   { href: "/rangliste", label: "Resultater", icon: Trophy },
   { href: "/peer-review", label: "Godkend tider", icon: ScanSearch },
   { href: "/profil", label: "Stats", icon: CircleUserRound },

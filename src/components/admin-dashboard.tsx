@@ -10,6 +10,7 @@ import {
   Pencil,
   Plus,
   Power,
+  RotateCcw,
   Save,
   Search,
   ShieldCheck,
@@ -18,8 +19,11 @@ import {
 import {
   adminUpdateAttemptAction,
   createCategoryAction,
+  deleteBattleRankAction,
   deleteUserAction,
+  resetBattleEloAction,
   resetUserPasswordAction,
+  saveBattleRankAction,
   setUserAdminAction,
   toggleCategoryAction,
   updateAchievementImageAction,
@@ -31,7 +35,8 @@ import { FormMessage, SubmitButton } from "@/components/form-controls";
 import { achievementMediaUrl } from "@/lib/achievement-media";
 import { achievementDefinitions } from "@/lib/achievements";
 import { formatDate, formatTime } from "@/lib/format";
-import type { AchievementAsset, AttemptStatus, Category, Profile } from "@/types/app";
+import { rankMediaUrl } from "@/lib/rank-media";
+import type { AchievementAsset, AttemptStatus, BattleRank, Category, Profile } from "@/types/app";
 
 export type AdminAttempt = {
   id: string;
@@ -56,6 +61,14 @@ export type AdminClan = {
   id: string;
   name: string;
   clan_members: { user_id: string }[];
+};
+
+export type AdminBattleRating = {
+  user_id: string;
+  elo: number;
+  wins: number;
+  losses: number;
+  draws: number;
 };
 
 const statusText: Record<AdminAttempt["status"], string> = {
@@ -192,12 +205,38 @@ function AchievementImageEditor({
   );
 }
 
+function RankEditor({
+  rank,
+  pending,
+  run,
+}: {
+  rank: BattleRank;
+  pending: boolean;
+  run: (action: () => Promise<{ ok: boolean; error?: string }>, success: string) => void;
+}) {
+  const image = rankMediaUrl(rank.image_path);
+  return (
+    <form className="admin-rank" onSubmit={(event) => { event.preventDefault(); run(() => saveBattleRankAction(new FormData(event.currentTarget)), `${rank.name} er gemt.`); }}>
+      <input type="hidden" name="id" value={rank.id} />
+      <span className="admin-rank__image" style={image ? { backgroundImage: `url(${image})` } : undefined}>{!image && <ShieldCheck aria-hidden="true" />}</span>
+      <div className="field"><label htmlFor={`rank-name-${rank.id}`}>Navn</label><input id={`rank-name-${rank.id}`} name="name" defaultValue={rank.name} maxLength={50} required /></div>
+      <div className="field"><label htmlFor={`rank-min-${rank.id}`}>Fra Elo</label><input id={`rank-min-${rank.id}`} name="minElo" type="number" min={0} step={1} defaultValue={rank.min_elo} required /></div>
+      <div className="field"><label htmlFor={`rank-max-${rank.id}`}>Til Elo</label><input id={`rank-max-${rank.id}`} name="maxElo" type="number" min={99} step={1} defaultValue={rank.max_elo} required /></div>
+      <label className="admin-rank__upload"><ImagePlus aria-hidden="true" /> Billede<input name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /></label>
+      {rank.image_path && <label className="admin-remove-media"><input type="checkbox" name="removeImage" /> Fjern billede</label>}
+      <div className="admin-rank__actions"><button type="button" className="icon-button icon-button--danger" title="Slet rang" disabled={pending} onClick={() => { if (window.confirm(`Slet rangen ${rank.name}? Elo ændres ikke.`)) run(() => deleteBattleRankAction(rank.id), "Rangen er slettet."); }}><Trash2 aria-hidden="true" /></button><button className="button button--primary button--small" disabled={pending}><Save aria-hidden="true" /> Gem</button></div>
+    </form>
+  );
+}
+
 export function AdminDashboard({
   categories,
   users,
   attempts,
   clans,
   achievementAssets,
+  battleRanks,
+  battleRatings,
   currentUserId,
 }: {
   categories: Category[];
@@ -205,6 +244,8 @@ export function AdminDashboard({
   attempts: AdminAttempt[];
   clans: AdminClan[];
   achievementAssets: AchievementAsset[];
+  battleRanks: BattleRank[];
+  battleRatings: AdminBattleRating[];
   currentUserId: string;
 }) {
   const [createState, createAction] = useActionState(createCategoryAction, {});
@@ -232,6 +273,7 @@ export function AdminDashboard({
     return matchesStatus && (!normalizedQuery || haystack.includes(normalizedQuery));
   });
   const achievementArtwork = new Map(achievementAssets.map((asset) => [asset.achievement_key, asset.image_path]));
+  const ratingsByUser = new Map(battleRatings.map((rating) => [rating.user_id, rating]));
 
   return (
     <div className="admin-dashboard">
@@ -256,6 +298,20 @@ export function AdminDashboard({
         </div>
       </section>
 
+      <section className="admin-section" id="kamprange">
+        <div className="admin-section__header"><div><p className="eyebrow">1v1-ligaen</p><h2>Kamprange og Elo</h2><p>Hver rang dækker præcis 100 Elo-point. Du kan ændre navne, billeder og intervaller uden at ændre spillernes Elo.</p></div><span>{battleRanks.length} range</span></div>
+        <div className="admin-rank-grid">{battleRanks.map((rank) => <RankEditor key={rank.id} rank={rank} pending={pending} run={run} />)}</div>
+        <form className="admin-rank admin-rank--new" onSubmit={(event) => { event.preventDefault(); run(() => saveBattleRankAction(new FormData(event.currentTarget)), "Den nye rang er oprettet."); }}>
+          <span className="admin-rank__image"><Plus aria-hidden="true" /></span>
+          <div className="field"><label htmlFor="new-rank-name">Ny rang</label><input id="new-rank-name" name="name" maxLength={50} placeholder="Elite" required /></div>
+          <div className="field"><label htmlFor="new-rank-min">Fra Elo</label><input id="new-rank-min" name="minElo" type="number" min={0} step={1} placeholder="1000" required /></div>
+          <div className="field"><label htmlFor="new-rank-max">Til Elo</label><input id="new-rank-max" name="maxElo" type="number" min={99} step={1} placeholder="1099" required /></div>
+          <label className="admin-rank__upload"><ImagePlus aria-hidden="true" /> Billede<input name="image" type="file" accept="image/jpeg,image/png,image/webp,image/gif" /></label>
+          <button className="button button--primary button--small" disabled={pending}><Plus aria-hidden="true" /> Opret</button>
+        </form>
+        <div className="admin-elo-reset"><div><strong>Elo-reset</strong><span>Flytter alle spillere til det laveste Elo-tal i deres nuværende rang. Ét tab kan derefter give nedrykning, undtagen fra den laveste rang.</span></div><button className="button button--danger" disabled={pending} onClick={() => { if (window.confirm("Nulstil alle spilleres Elo til bunden af deres nuværende rang? Handlingen kan ikke fortrydes.")) run(() => resetBattleEloAction(), "Alle spillere er nulstillet til bunden af deres rang."); }}><RotateCcw aria-hidden="true" /> Nulstil al Elo</button></div>
+      </section>
+
       <section className="admin-section" id="tider">
         <div className="admin-section__header"><div><p className="eyebrow">Dommerbordet</p><h2>Alle registrerede tider</h2><p>Søg og ret spiller, kategori, klan, varighed og gyldighed.</p></div><span>{filteredAttempts.length} af {attempts.length}</span></div>
         <div className="admin-filters"><label><Search aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Søg bruger, kategori, klan eller ID" /></label><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">Alle statusser</option><option value="awaiting_confirmation">Ikke indsendt</option><option value="pending_review">Afventer review</option><option value="approved">Bekræftet</option><option value="declined">Afvist</option><option value="invalidated">Ugyldig</option></select></div>
@@ -265,7 +321,7 @@ export function AdminDashboard({
       <section className="admin-section" id="brugere">
         <div className="admin-section__header"><div><p className="eyebrow">Spillerlisten</p><h2>Brugere</h2><p>Nulstil en glemt kode, skift adminrolle eller slet en falsk bruger.</p></div><span>{users.length} brugere</span></div>
         <div className="admin-user-grid">{users.map((user) => (
-          <article className="admin-user" key={user.id}><Avatar username={user.username} path={user.avatar_path} size="medium" /><div><strong>@{user.username}</strong><small>{user.role === "admin" ? "Administrator" : `Oprettet ${formatDate(user.created_at)}`}</small></div><div className="admin-user__actions">
+          <article className="admin-user" key={user.id}><Avatar username={user.username} path={user.avatar_path} size="medium" /><div><strong>@{user.username}</strong><small>{user.role === "admin" ? "Administrator" : `Oprettet ${formatDate(user.created_at)}`}{ratingsByUser.get(user.id) ? ` · ${ratingsByUser.get(user.id)?.elo} Elo` : ""}</small></div><div className="admin-user__actions">
             <button className={user.role === "admin" ? "icon-button icon-button--admin" : "icon-button"} title={user.role === "admin" ? "Fjern administrator" : "Gør til administrator"} disabled={pending || user.id === currentUserId} onClick={() => run(() => setUserAdminAction(user.id, user.role !== "admin"), user.role === "admin" ? "Adminrollen er fjernet." : "Brugeren er nu administrator.")}><ShieldCheck aria-hidden="true" /></button>
             <button className="icon-button" title="Nulstil adgangskode" disabled={pending} onClick={() => { const password = window.prompt(`Ny adgangskode til @${user.username}:`); if (password) run(() => resetUserPasswordAction(user.id, password), "Adgangskoden er nulstillet."); }}><KeyRound aria-hidden="true" /></button>
             <button className="icon-button icon-button--danger" title="Slet bruger" disabled={pending || user.id === currentUserId} onClick={() => { if (window.confirm(`Slet @${user.username} og alle brugerens tider permanent?`)) run(() => deleteUserAction(user.id), "Brugeren er slettet."); }}><Trash2 aria-hidden="true" /></button>
