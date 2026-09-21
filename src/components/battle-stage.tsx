@@ -24,6 +24,7 @@ import {
   cancelBattleAction,
   createBattleAction,
   declineOwnBattleTimeAction,
+  loadMoreBattleHistoryAction,
   refreshBattleHub,
   reviewBattleTimeAction,
   respondBattleAction,
@@ -36,7 +37,7 @@ import { CategoryVisual } from "@/components/category-visual";
 import { ClanImage } from "@/components/clan-image";
 import { formatDate, formatTime } from "@/lib/format";
 import { rankMediaUrl } from "@/lib/rank-media";
-import type { Battle, BattleClan, BattleHub, Category, Friendship } from "@/types/app";
+import type { Battle, BattleClan, BattleHub, BattleRank, BattleStanding, Category, Friendship } from "@/types/app";
 
 function participant(battle: Battle, userId: string) {
   return battle.participants.find((item) => item.user_id === userId);
@@ -64,9 +65,10 @@ function eloProjection(battle: Battle, userId: string) {
   const otherId = battle.challenger_id === userId ? battle.opponent_id : battle.challenger_id;
   const other = participant(battle, otherId)?.elo_before ?? 500;
   const expected = 1 / (1 + 10 ** ((other - mine) / 400));
-  const projectedLoss = Math.round(40 * (0 - expected));
+  const factor = battle.category.battle_elo_factor;
+  const projectedLoss = Math.round(factor * (0 - expected));
   return {
-    win: Math.max(1, Math.round(40 * (1 - expected))),
+    win: Math.max(1, Math.round(factor * (1 - expected))),
     loss: Math.max(-mine, Math.min(-1, projectedLoss)),
   };
 }
@@ -96,6 +98,27 @@ function MatchSettings({ battle }: { battle: Battle }) {
   );
 }
 
+function RankProgression({ ranks, standing }: { ranks: BattleRank[]; standing: BattleStanding | null }) {
+  const activeRank = ranks.find((rank) => rank.id === standing?.rank_id);
+  const elo = standing?.elo;
+  if (!ranks.length || !activeRank || elo == null) return null;
+  const width = activeRank.max_elo - activeRank.min_elo + 1;
+  const progress = elo >= activeRank.max_elo ? 100 : Math.max(0, Math.min(100, ((elo - activeRank.min_elo) / width) * 100));
+  return (
+    <section className="battle-rank-road">
+      <div className="section-heading"><h2>RANGREJSEN</h2><strong>{elo}<small>ELO</small></strong></div>
+      <div className="battle-rank-road__marks" aria-label="Alle 1v1-range">
+        {ranks.map((rank) => {
+          const image = rankMediaUrl(rank.image_path);
+          return <span key={rank.id} aria-label={rank.name} aria-current={rank.id === activeRank.id ? "true" : undefined} className={clsx(rank.id === activeRank.id && "is-current")} style={image ? { backgroundImage: `url(${image})` } : undefined}>{!image && <Shield aria-hidden="true" />}</span>;
+        })}
+      </div>
+      <div className="battle-rank-road__progress" role="progressbar" aria-label={`Fremskridt i ${activeRank.name}`} aria-valuemin={activeRank.min_elo} aria-valuemax={activeRank.max_elo} aria-valuenow={Math.max(activeRank.min_elo, Math.min(activeRank.max_elo, elo))}><span style={{ width: `${progress}%` }} /></div>
+      <div className="battle-rank-road__scale"><span>{activeRank.min_elo}</span><span>{activeRank.max_elo}</span></div>
+    </section>
+  );
+}
+
 function ResultCard({
   battle,
   userId,
@@ -116,15 +139,16 @@ function ResultCard({
   const displayedWinner = battle.settled_at ? battle.winner_id : battle.provisional_winner_id;
   const won = displayedWinner === userId;
   const settled = Boolean(battle.settled_at);
+  const draw = settled && !displayedWinner;
   const opponentNeedsReview = other?.attempt?.status === "pending_review";
   const ownOfficial = mine?.attempt?.status === "approved";
   const ownDeclined = mine?.attempt?.status === "declined" || mine?.attempt?.status === "invalidated";
   const rankChanged = mine?.rank_before_name !== mine?.rank_after_name;
   return (
-    <article className={clsx("battle-result", won && "is-win", settled && !won && "is-loss")}>
+    <article className={clsx("battle-result", won && "is-win", settled && !won && !draw && "is-loss", draw && "is-draw")}>
       <div className="battle-result__headline">
         <span>{won ? <Trophy aria-hidden="true" /> : <Shield aria-hidden="true" />}</span>
-        <div><p className="eyebrow">mod @{opponent.username}</p><h2>{ownDeclined && !settled ? "TID AFVIST" : settled && !displayedWinner ? "INGEN VINDER" : won ? "DU VANDT" : "DU TABTE"}</h2></div>
+        <div><p className="eyebrow">mod @{opponent.username}</p><h2>{ownDeclined && !settled ? "TID AFVIST" : draw ? "UAFGJORT" : won ? "DU VANDT" : "DU TABTE"}</h2></div>
       </div>
       <div className="battle-result__times">
         <span>Din tid <strong>{mine?.elapsed_ms == null ? "-" : `${formatTime(mine.elapsed_ms)}s`}</strong></span>
@@ -214,15 +238,19 @@ export function BattleStage({
   categories,
   friends,
   clans,
+  battleRanks,
   initialHub,
 }: {
   userId: string;
   categories: Category[];
   friends: Friendship[];
   clans: BattleClan[];
+  battleRanks: BattleRank[];
   initialHub: BattleHub;
 }) {
   const [hub, setHub] = useState(initialHub);
+  const [history, setHistory] = useState(initialHub.history);
+  const [historyHasMore, setHistoryHasMore] = useState(initialHub.history_has_more);
   const [showCreate, setShowCreate] = useState(false);
   const [opponentQuery, setOpponentQuery] = useState("");
   const [selectedFriend, setSelectedFriend] = useState("");
@@ -233,6 +261,7 @@ export function BattleStage({
   const [freshResultUntil, setFreshResultUntil] = useState(0);
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
+  const [historyPending, startHistoryTransition] = useTransition();
   const polling = useRef(false);
   const battle = hub.current;
   const battleStatus = battle?.status;
@@ -244,13 +273,13 @@ export function BattleStage({
   const elapsed = startsAt ? Math.max(0, now - startsAt) : 0;
   const sharedClans = clans.filter((clan) => clan.member_ids.includes(selectedFriend));
   const resultBattle = freshResultId && now < freshResultUntil
-    ? [...hub.review_matches, ...hub.history].find((item) => item.id === freshResultId) ?? null
+    ? [...hub.review_matches, ...history].find((item) => item.id === freshResultId) ?? null
     : null;
   const normalizedQuery = opponentQuery.trim().toLocaleLowerCase("da");
   const searchResults = normalizedQuery
     ? friends.filter((friend) => friend.username.toLocaleLowerCase("da").includes(normalizedQuery)).slice(0, 6)
     : [];
-  const recentOpponentIds = hub.history
+  const recentOpponentIds = history
     .filter((item) => item.status === "completed")
     .map((item) => item.challenger_id === userId ? item.opponent_id : item.challenger_id);
   const suggestions = [...friends]
@@ -261,6 +290,14 @@ export function BattleStage({
     })
     .slice(0, 3);
   const selectedOpponent = friends.find((friend) => friend.other_user_id === selectedFriend);
+
+  function applyHub(nextHub: BattleHub) {
+    setHub(nextHub);
+    setHistory((current) => {
+      const merged = new Map([...nextHub.history, ...current].map((item) => [item.id, item]));
+      return [...merged.values()].sort((left, right) => right.created_at.localeCompare(left.created_at));
+    });
+  }
 
   useEffect(() => {
     if (!startsAt || !battle || !["countdown", "active", "completed"].includes(battle.status)) return;
@@ -274,7 +311,7 @@ export function BattleStage({
       polling.current = true;
       try {
         const result = await refreshBattleHub();
-        if (result.ok) setHub(result.data);
+        if (result.ok) applyHub(result.data);
       } finally {
         polling.current = false;
       }
@@ -307,7 +344,7 @@ export function BattleStage({
       try {
         const result = await action();
         if (result.ok) {
-          setHub(result.data);
+          applyHub(result.data);
           onSuccess?.(result.data);
         } else setError(result.error);
       } catch {
@@ -321,6 +358,24 @@ export function BattleStage({
     setOpponentQuery(friend.username);
     setSelectedClan(null);
   };
+
+  function loadMoreHistory() {
+    const oldest = history.at(-1);
+    if (!oldest) return;
+    setError(undefined);
+    startHistoryTransition(async () => {
+      const result = await loadMoreBattleHistoryAction(oldest.created_at);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setHistory((current) => {
+        const known = new Set(current.map((item) => item.id));
+        return [...current, ...result.data.battles.filter((item) => !known.has(item.id))];
+      });
+      setHistoryHasMore(result.data.has_more);
+    });
+  }
 
   if (countdown && battle) {
     return (
@@ -426,13 +481,15 @@ export function BattleStage({
         </section>
       )}
 
-      {hub.history.some((item) => item.status === "completed") && (
-        <section className="battle-history"><div className="section-heading"><h2>SENESTE KAMPE</h2></div>{hub.history.filter((item) => item.status === "completed").slice(0, 5).map((item) => {
+      {error && !showCreate && <p className="form-message form-message--error" role="alert">{error}</p>}
+      {history.length > 0 && (
+        <section className="battle-history"><div className="section-heading"><h2>SENESTE KAMPE</h2></div><div className="battle-history__list">{history.map((item) => {
           const own = participant(item, userId);
           const foe = opponentFor(item, userId);
-          return <article key={item.id}><Avatar username={foe.username} path={foe.avatar_path} size="small" /><div><strong>@{foe.username}</strong><small>{item.category.name} · {formatDate(item.completed_at ?? item.created_at)}</small></div><b>{item.winner_id ? item.winner_id === userId ? "V" : "T" : "-"}</b><span>{own?.elo_change != null ? `${own.elo_change >= 0 ? "+" : ""}${own.elo_change}` : "-"}</span></article>;
-        })}</section>
+          return <article key={item.id}><Avatar username={foe.username} path={foe.avatar_path} size="small" /><div><strong>@{foe.username}</strong><small>{item.category.name} · {formatDate(item.completed_at ?? item.created_at)}</small></div><b>{item.winner_id ? item.winner_id === userId ? "V" : "T" : "U"}</b><span>{own?.elo_change != null ? `${own.elo_change >= 0 ? "+" : ""}${own.elo_change}` : "-"}</span></article>;
+        })}</div>{historyHasMore && <button type="button" className="button button--ghost battle-history__more" disabled={historyPending} onClick={loadMoreHistory}>{historyPending ? "Henter..." : "Indlæs flere kampe"}</button>}</section>
       )}
+      <RankProgression ranks={battleRanks} standing={hub.standing} />
     </>
   );
 }

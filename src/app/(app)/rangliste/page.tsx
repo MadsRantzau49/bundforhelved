@@ -25,7 +25,7 @@ export default async function LeaderboardPage({
   const [categoriesResult, membershipsResult] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, battle_elo_factor, sort_order, is_active")
       .eq("is_active", true)
       .order("sort_order"),
     supabase

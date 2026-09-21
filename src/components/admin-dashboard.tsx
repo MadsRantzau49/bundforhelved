@@ -28,6 +28,7 @@ import {
   setUserAdminAction,
   toggleCategoryAction,
   updateAchievementImageAction,
+  updateCategoryBattleEloFactorAction,
   updateCategoryAction,
 } from "@/actions/admin";
 import { Avatar } from "@/components/avatar";
@@ -205,6 +206,30 @@ function RankEditor({
   );
 }
 
+function BattleImpactEditor({
+  category,
+  pending,
+  run,
+}: {
+  category: Category;
+  pending: boolean;
+  run: (action: () => Promise<{ ok: boolean; error?: string }>, success: string) => void;
+}) {
+  return (
+    <form className="admin-battle-impact" onSubmit={(event) => {
+      event.preventDefault();
+      const factor = Number(new FormData(event.currentTarget).get("factor"));
+      run(() => updateCategoryBattleEloFactorAction(category.id, factor), `${category.name} bruger nu Elo-impact ${factor}.`);
+    }}>
+      <CategoryVisual iconKey={category.icon_key} imagePath={category.image_path} name={category.name} />
+      <div><strong>{category.name}</strong><small>{category.is_active ? "Aktiv bane" : "Arkiveret bane"}</small></div>
+      <label htmlFor={`battle-impact-${category.id}`}>Impact</label>
+      <input id={`battle-impact-${category.id}`} name="factor" type="number" min={1} step={1} defaultValue={category.battle_elo_factor} required />
+      <button className="button button--primary button--small" disabled={pending}><Save aria-hidden="true" /> Gem</button>
+    </form>
+  );
+}
+
 export function AdminDashboard({
   categories,
   users,
@@ -335,7 +360,11 @@ export function AdminDashboard({
       </section>
 
       <section className="admin-section" id="kamprange">
-        <div className="admin-section__header"><div><p className="eyebrow">1v1-ligaen</p><h2>Kamprange og Elo</h2><p>Hver rang dækker præcis 100 Elo-point. Du kan ændre navne, billeder og intervaller uden at ændre spillernes Elo.</p></div><span>{battleRanks.length} range</span></div>
+        <div className="admin-section__header"><div><p className="eyebrow">1v1-ligaen</p><h2>Kamprange og Elo</h2><p>Vælg selv bredden på hver rang. Intervaller må ikke overlappe, og ændringer flytter ikke spillernes Elo.</p></div><span>{battleRanks.length} range</span></div>
+        <div className="admin-battle-impact-panel">
+          <div><strong>Elo-impact pr. kamp</strong><p>Indstil hver bane separat. Højere tal giver større Elo-ændringer, mens lavere tal gør udviklingen langsommere. Ved lige Elo giver standarden 40 cirka +20 til vinderen og -20 til taberen.</p></div>
+          <div className="admin-battle-impact-grid">{categories.map((category) => <BattleImpactEditor key={category.id} category={category} pending={pending} run={run} />)}</div>
+        </div>
         <div className="admin-rank-grid">{battleRanks.map((rank) => <RankEditor key={rank.id} rank={rank} pending={pending} run={run} />)}</div>
         <form className="admin-rank admin-rank--new" onSubmit={(event) => { event.preventDefault(); run(() => saveBattleRankAction(new FormData(event.currentTarget)), "Den nye rang er oprettet."); }}>
           <span className="admin-rank__image"><Plus aria-hidden="true" /></span>

@@ -26,6 +26,7 @@ export type Category = {
   guide_text: string;
   guide_video_path: string | null;
   demo_video_path: string | null;
+  battle_elo_factor: number;
   sort_order: number;
   is_active: boolean;
 };
@@ -284,7 +285,7 @@ export type Battle = {
   created_at: string;
   challenger: Pick<Profile, "id" | "username" | "avatar_path">;
   opponent: Pick<Profile, "id" | "username" | "avatar_path">;
-  category: Pick<Category, "id" | "name" | "icon_key" | "accent_color" | "image_path">;
+  category: Pick<Category, "id" | "name" | "icon_key" | "accent_color" | "image_path" | "battle_elo_factor">;
   clan: Pick<Clan, "id" | "name" | "image_path"> | null;
   participants: BattleParticipant[];
 };
@@ -294,8 +295,14 @@ export type BattleHub = {
   invitations: Battle[];
   review_matches: Battle[];
   history: Battle[];
+  history_has_more: boolean;
   standing: BattleStanding | null;
   has_active_timer: boolean;
+};
+
+export type BattleHistoryPage = {
+  battles: Battle[];
+  has_more: boolean;
 };
 
 export type BattleClan = Pick<Clan, "id" | "name" | "image_path"> & {

@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { listAdminAttemptsAction } from "@/actions/admin";
+import { listAdminAttemptsAction, updateCategoryBattleEloFactorAction } from "@/actions/admin";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import type { AdminAttempt, AdminAttemptPage, Category, Profile } from "@/types/app";
 
@@ -13,6 +13,7 @@ vi.mock("@/actions/admin", () => ({
   setUserAdminAction: vi.fn(),
   toggleCategoryAction: vi.fn(),
   updateAchievementImageAction: vi.fn(),
+  updateCategoryBattleEloFactorAction: vi.fn(),
   updateCategoryAction: vi.fn(),
 }));
 
@@ -26,6 +27,7 @@ const category: Category = {
   guide_text: "",
   guide_video_path: null,
   demo_video_path: null,
+  battle_elo_factor: 40,
   sort_order: 1,
   is_active: true,
 };
@@ -106,6 +108,17 @@ describe("AdminDashboard", () => {
     expect(await screen.findByText("2 af 2")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Indlæs flere tider" })).not.toBeInTheDocument();
   }, 15_000);
+
+  it("saves the per-map battle Elo impact", async () => {
+    vi.mocked(updateCategoryBattleEloFactorAction).mockResolvedValue({ ok: true, data: undefined });
+    renderDashboard({ attempts: [], total: 0, hasMore: false, nextCursor: null });
+
+    const input = screen.getByRole("spinbutton", { name: "Impact" });
+    fireEvent.change(input, { target: { value: "80" } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => expect(updateCategoryBattleEloFactorAction).toHaveBeenCalledWith(category.id, 80));
+  });
 
   it("searches all attempts on the server", async () => {
     vi.mocked(listAdminAttemptsAction).mockResolvedValue({

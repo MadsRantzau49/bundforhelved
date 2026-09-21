@@ -3,12 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { requireProfile } from "@/lib/auth/session";
-import { loadBattleHub } from "@/lib/battles";
+import { loadBattleHistoryPage, loadBattleHub } from "@/lib/battles";
 import { errorMessage } from "@/lib/errors";
 import { deliverPendingPushNotifications } from "@/lib/notifications/push";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { uuidSchema } from "@/lib/validation";
-import type { ActionResult, BattleHub } from "@/types/app";
+import type { ActionResult, BattleHistoryPage, BattleHub } from "@/types/app";
 
 async function refreshedHub(userId: string): Promise<ActionResult<BattleHub>> {
   try {
@@ -21,6 +21,16 @@ async function refreshedHub(userId: string): Promise<ActionResult<BattleHub>> {
 export async function refreshBattleHub(): Promise<ActionResult<BattleHub>> {
   const profile = await requireProfile();
   return refreshedHub(profile.id);
+}
+
+export async function loadMoreBattleHistoryAction(before: string): Promise<ActionResult<BattleHistoryPage>> {
+  const profile = await requireProfile();
+  if (!Number.isFinite(Date.parse(before))) return { ok: false, error: "Kampoversigten kunne ikke indlæses." };
+  try {
+    return { ok: true, data: await loadBattleHistoryPage(profile.id, before) };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Flere kampe kunne ikke hentes.") };
+  }
 }
 
 export async function createBattleAction(

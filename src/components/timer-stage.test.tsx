@@ -34,6 +34,7 @@ const category: Category = {
   guide_text: "",
   guide_video_path: null,
   demo_video_path: null,
+  battle_elo_factor: 40,
   sort_order: 1,
   is_active: true,
 };

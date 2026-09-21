@@ -15,7 +15,7 @@ export default async function AdminPage() {
   const [categoriesResult, usersResult, attemptsResult, clansResult, achievementAssetsResult, battleRanksResult, battleRatingsResult] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, battle_elo_factor, sort_order, is_active")
       .order("sort_order"),
     supabase
       .from("profiles")

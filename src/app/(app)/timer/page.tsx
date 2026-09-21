@@ -17,7 +17,7 @@ export default async function TimerPage({
   const [categoriesResult, attemptResult, playersResult, latestAttemptResult] = await Promise.all([
     supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, battle_elo_factor, sort_order, is_active")
       .eq("is_active", true)
       .order("sort_order")
       .order("name"),
@@ -78,7 +78,7 @@ export default async function TimerPage({
   if (activeAttempt && !categories.some((category) => category.id === activeAttempt.category_id)) {
     const { data, error } = await supabase
       .from("categories")
-      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, sort_order, is_active")
+      .select("id, name, icon_key, accent_color, description, image_path, guide_text, guide_video_path, demo_video_path, battle_elo_factor, sort_order, is_active")
       .eq("id", activeAttempt.category_id)
       .maybeSingle();
     if (error) throw new Error("Forsøgets kategori kunne ikke hentes.");

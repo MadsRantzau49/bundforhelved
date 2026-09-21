@@ -56,8 +56,8 @@ export async function saveBattleRankAction(formData: FormData): Promise<ActionRe
   const maxElo = Number(formString(formData, "maxElo"));
   if (parsedId && !parsedId.success) return { ok: false, error: "Rangen er ugyldig." };
   if (!name || name.length > 50) return { ok: false, error: "Navnet skal være mellem 1 og 50 tegn." };
-  if (!Number.isSafeInteger(minElo) || minElo < 0 || !Number.isSafeInteger(maxElo) || maxElo !== minElo + 99) {
-    return { ok: false, error: "Hver rang skal dække præcis 100 Elo-point." };
+  if (!Number.isSafeInteger(minElo) || minElo < 0 || !Number.isSafeInteger(maxElo) || maxElo < minElo) {
+    return { ok: false, error: "Rangens Elo-interval er ugyldigt." };
   }
 
   try {
@@ -119,6 +119,28 @@ export async function deleteBattleRankAction(rankId: string): Promise<ActionResu
     return { ok: true, data: undefined };
   } catch (error) {
     return { ok: false, error: errorMessage(error, "Rangen kunne ikke slettes.") };
+  }
+}
+
+export async function updateCategoryBattleEloFactorAction(categoryId: string, factorValue: number): Promise<ActionResult> {
+  await requireAdmin();
+  if (!Number.isSafeInteger(factorValue) || factorValue <= 0 || factorValue > 2_147_483_647) {
+    return { ok: false, error: "Elo-impact skal være et positivt heltal." };
+  }
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase
+      .from("categories")
+      .update({ battle_elo_factor: factorValue })
+      .eq("id", uuidSchema.parse(categoryId))
+      .select("id")
+      .single();
+    if (error) throw error;
+    revalidatePath("/admin");
+    revalidatePath("/battle");
+    return { ok: true, data: undefined };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Banens Elo-impact kunne ikke gemmes.") };
   }
 }
 
@@ -267,6 +289,7 @@ export async function updateCategoryAction(formData: FormData): Promise<ActionRe
     if (replaced.length) await supabase.storage.from("category-media").remove(replaced);
     revalidatePath("/admin");
     revalidatePath("/timer");
+    revalidatePath("/battle");
     revalidatePath("/guide");
     revalidatePath("/rangliste");
     revalidatePath("/profil");
