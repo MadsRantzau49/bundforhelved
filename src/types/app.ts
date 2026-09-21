@@ -253,6 +253,20 @@ export type BattleRankLabel = {
 };
 
 export type BattleStatus = "pending" | "ready" | "countdown" | "active" | "completed" | "declined" | "cancelled";
+export type BattleMode = "normal" | "handicap";
+
+export type BattleHandicapPreview = {
+  challenger_best_ms: number;
+  opponent_best_ms: number;
+  handicap_user_id: string;
+  suggested_handicap_ms: number;
+  time_elo_per_doubling: number;
+  battle_elo_factor: number;
+  challenger_elo: number;
+  opponent_elo: number;
+  repeat_opponent_count: number;
+  elo_stake_multiplier: number;
+};
 
 export type BattleParticipant = {
   user_id: string;
@@ -276,6 +290,17 @@ export type Battle = {
   opponent_id: string;
   category_id: string;
   clan_id: string | null;
+  battle_mode: BattleMode;
+  handicap_user_id: string | null;
+  handicap_ms: number;
+  suggested_handicap_ms: number;
+  max_handicap_ms: number;
+  challenger_best_ms: number | null;
+  opponent_best_ms: number | null;
+  handicap_expected_challenger: number | null;
+  repeat_opponent_count: number;
+  elo_stake_multiplier: number;
+  battle_elo_factor: number;
   status: BattleStatus;
   starts_at: string | null;
   provisional_winner_id: string | null;

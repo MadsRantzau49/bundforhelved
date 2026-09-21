@@ -8,7 +8,7 @@ import { errorMessage } from "@/lib/errors";
 import { deliverPendingPushNotifications } from "@/lib/notifications/push";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { uuidSchema } from "@/lib/validation";
-import type { ActionResult, BattleHistoryPage, BattleHub } from "@/types/app";
+import type { ActionResult, BattleHandicapPreview, BattleHistoryPage, BattleHub, BattleMode } from "@/types/app";
 
 async function refreshedHub(userId: string): Promise<ActionResult<BattleHub>> {
   try {
@@ -33,18 +33,42 @@ export async function loadMoreBattleHistoryAction(before: string): Promise<Actio
   }
 }
 
+export async function getBattleHandicapPreviewAction(categoryId: string, opponentId: string): Promise<ActionResult<BattleHandicapPreview>> {
+  await requireProfile();
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.rpc("get_battle_handicap_preview", {
+      category: uuidSchema.parse(categoryId),
+      opponent: uuidSchema.parse(opponentId),
+    }).single();
+    if (error) throw error;
+    return { ok: true, data: data as BattleHandicapPreview };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error, "Handicap kræver en godkendt personlig rekord fra begge spillere i kategorien.") };
+  }
+}
+
 export async function createBattleAction(
   categoryId: string,
   clanId: string | null,
   opponentId: string,
+  battleMode: BattleMode = "normal",
+  handicapUserId: string | null = null,
+  handicapMs = 0,
 ): Promise<ActionResult<BattleHub>> {
   const profile = await requireProfile();
+  if (!(["normal", "handicap"] as const).includes(battleMode) || !Number.isSafeInteger(handicapMs) || handicapMs < 0) {
+    return { ok: false, error: "Kampens handicap er ugyldigt." };
+  }
   try {
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase.rpc("create_battle", {
       category: uuidSchema.parse(categoryId),
       clan: clanId ? uuidSchema.parse(clanId) : null,
       opponent: uuidSchema.parse(opponentId),
+      match_mode: battleMode,
+      handicap_user: battleMode === "handicap" ? uuidSchema.parse(handicapUserId) : null,
+      handicap: handicapMs,
     });
     if (error) throw error;
     revalidatePath("/battle");

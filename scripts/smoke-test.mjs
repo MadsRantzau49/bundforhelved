@@ -446,6 +446,72 @@ try {
   const globalAttempt = await approveAttempt(owner, observer, { withEvidence: true });
   const clanAttempt = await approveAttempt(observer, owner, { selectedClan: clanId, unrelated: clanFriend });
   const outsiderAttempt = await approveAttempt(outsider, observer, { unrelated: owner });
+
+  const normalBattleId = await request(`${baseUrl}/rest/v1/rpc/create_battle`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({
+      category: categories[0].id,
+      clan: null,
+      opponent: observer.id,
+      match_mode: "normal",
+      handicap_user: null,
+      handicap: 0,
+    }),
+  });
+  const normalBattles = await request(
+    `${baseUrl}/rest/v1/battles?id=eq.${normalBattleId}&select=id,battle_mode,status`,
+    { headers: owner.headers },
+  );
+  if (normalBattles[0]?.battle_mode !== "normal" || normalBattles[0]?.status !== "pending") {
+    throw new Error("A normal 1v1 invitation was not created correctly.");
+  }
+  await request(`${baseUrl}/rest/v1/rpc/cancel_battle`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ battle: normalBattleId }),
+  });
+
+  const handicapPreviews = await request(`${baseUrl}/rest/v1/rpc/get_battle_handicap_preview`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ category: categories[0].id, opponent: observer.id }),
+  });
+  const handicapPreview = handicapPreviews[0];
+  if (!handicapPreview || ![owner.id, observer.id].includes(handicapPreview.handicap_user_id)) {
+    throw new Error("The 1v1 handicap preview did not return a valid suggestion.");
+  }
+  const handicapBattleId = await request(`${baseUrl}/rest/v1/rpc/create_battle`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({
+      category: categories[0].id,
+      clan: null,
+      opponent: observer.id,
+      match_mode: "handicap",
+      handicap_user: handicapPreview.handicap_user_id,
+      handicap: handicapPreview.suggested_handicap_ms,
+    }),
+  });
+  const handicapBattles = await request(
+    `${baseUrl}/rest/v1/battles?id=eq.${handicapBattleId}&select=id,battle_mode,status,handicap_expected_challenger`,
+    { headers: owner.headers },
+  );
+  const suggestedExpected = Number(handicapBattles[0]?.handicap_expected_challenger);
+  if (
+    handicapBattles[0]?.battle_mode !== "handicap" ||
+    handicapBattles[0]?.status !== "pending" ||
+    suggestedExpected < 0.49 ||
+    suggestedExpected > 0.51
+  ) {
+    throw new Error("A suggested handicap did not create an approximately 50/50 1v1 invitation.");
+  }
+  await request(`${baseUrl}/rest/v1/rpc/cancel_battle`, {
+    method: "POST",
+    headers: owner.headers,
+    body: JSON.stringify({ battle: handicapBattleId }),
+  });
+
   const directorBoard = await request(`${baseUrl}/rest/v1/rpc/get_category_drink_director_leaderboard`, {
     method: "POST",
     headers: owner.headers,
@@ -865,4 +931,4 @@ try {
   }
 }
 
-console.log("Smoke test passed: app, Auth, scoped timers, friends, reviews, guests, clans, RLS, and Storage.");
+console.log("Smoke test passed: app, Auth, timers, 1v1 battles, friends, reviews, guests, clans, RLS, and Storage.");

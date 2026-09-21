@@ -27,5 +27,8 @@ export function errorMessage(error: unknown, fallback = "Noget gik galt. Prøv i
   if (message.includes("transfer ownership")) return "Overfør ejerskabet, før du forlader klanen.";
   if (message.includes("new owner must")) return "Den nye ejer skal allerede være medlem.";
   if (message.includes("rate limit")) return "For mange forsøg. Vent lidt og prøv igen.";
+  if (message.includes("approved personal bests required")) return "Handicap kræver en godkendt personlig rekord fra begge spillere i kategorien.";
+  if (message.includes("personal bests are already equal")) return "Jeres personlige rekorder er allerede ens. Vælg en normal kamp.";
+  if (message.includes("handicap terms are invalid")) return "Vælg hvem der får ekstra tid, og skriv et positivt antal sekunder.";
   return fallback;
 }

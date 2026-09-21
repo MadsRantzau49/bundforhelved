@@ -8,6 +8,7 @@ import {
   CircleStop,
   Clock3,
   Globe2,
+  Gauge,
   Hourglass,
   Inbox,
   Play,
@@ -24,6 +25,7 @@ import {
   cancelBattleAction,
   createBattleAction,
   declineOwnBattleTimeAction,
+  getBattleHandicapPreviewAction,
   loadMoreBattleHistoryAction,
   refreshBattleHub,
   reviewBattleTimeAction,
@@ -36,8 +38,9 @@ import { CategoryIcon } from "@/components/category-icon";
 import { CategoryVisual } from "@/components/category-visual";
 import { ClanImage } from "@/components/clan-image";
 import { formatDate, formatTime } from "@/lib/format";
+import { handicapExpectedChallenger, projectedEloChange } from "@/lib/battle-handicap";
 import { rankMediaUrl } from "@/lib/rank-media";
-import type { Battle, BattleClan, BattleHub, BattleRank, BattleStanding, Category, Friendship } from "@/types/app";
+import type { Battle, BattleClan, BattleHandicapPreview, BattleHub, BattleMode, BattleRank, BattleStanding, Category, Friendship, Profile } from "@/types/app";
 
 function participant(battle: Battle, userId: string) {
   return battle.participants.find((item) => item.user_id === userId);
@@ -45,6 +48,11 @@ function participant(battle: Battle, userId: string) {
 
 function opponentFor(battle: Battle, userId: string) {
   return battle.challenger_id === userId ? battle.opponent : battle.challenger;
+}
+
+function adjustedElapsed(battle: Battle, userId: string, elapsedMs: number | null | undefined) {
+  if (elapsedMs == null) return null;
+  return Math.max(0, elapsedMs - (battle.handicap_user_id === userId ? battle.handicap_ms : 0));
 }
 
 function RankMark({ name, imagePath, large = false }: { name: string | null; imagePath: string | null; large?: boolean }) {
@@ -64,13 +72,13 @@ function eloProjection(battle: Battle, userId: string) {
   const mine = participant(battle, userId)?.elo_before ?? 500;
   const otherId = battle.challenger_id === userId ? battle.opponent_id : battle.challenger_id;
   const other = participant(battle, otherId)?.elo_before ?? 500;
+  if (battle.battle_mode === "handicap") {
+    const challengerExpected = battle.handicap_expected_challenger ?? 0.5;
+    const expected = userId === battle.challenger_id ? challengerExpected : 1 - challengerExpected;
+    return projectedEloChange(battle.battle_elo_factor * battle.elo_stake_multiplier, expected, mine);
+  }
   const expected = 1 / (1 + 10 ** ((other - mine) / 400));
-  const factor = battle.category.battle_elo_factor;
-  const projectedLoss = Math.round(factor * (0 - expected));
-  return {
-    win: Math.max(1, Math.round(factor * (1 - expected))),
-    loss: Math.max(-mine, Math.min(-1, projectedLoss)),
-  };
+  return projectedEloChange(battle.battle_elo_factor * battle.elo_stake_multiplier, expected, mine);
 }
 
 function EloPair({ battle, userId, projections = false }: { battle: Battle; userId: string; projections?: boolean }) {
@@ -90,10 +98,13 @@ function EloPair({ battle, userId, projections = false }: { battle: Battle; user
 }
 
 function MatchSettings({ battle }: { battle: Battle }) {
+  const handicapPlayer = battle.handicap_user_id === battle.challenger_id ? battle.challenger : battle.opponent;
   return (
     <div className="battle-match-settings">
       <span><CategoryIcon iconKey={battle.category.icon_key} /> <strong>{battle.category.name}</strong><small>Våben</small></span>
       <span>{battle.clan ? <UsersRound aria-hidden="true" /> : <Globe2 aria-hidden="true" />} <strong>{battle.clan?.name ?? "Global"}</strong><small>Rangliste</small></span>
+      {battle.battle_mode === "handicap" && <span className="battle-match-settings__handicap"><Gauge aria-hidden="true" /> <strong>@{handicapPlayer.username} får +{formatTime(battle.handicap_ms)}s</strong><small>Handicap · trækkes fra sluttiden</small></span>}
+      {battle.repeat_opponent_count > 0 && <span><Shield aria-hidden="true" /> <strong>{Math.round(battle.elo_stake_multiplier * 100)}% ELO</strong><small>Kamp #{battle.repeat_opponent_count + 1} i træk mod samme spiller</small></span>}
     </div>
   );
 }
@@ -136,7 +147,7 @@ function ResultCard({
   const otherId = battle.challenger_id === userId ? battle.opponent_id : battle.challenger_id;
   const other = participant(battle, otherId);
   const opponent = opponentFor(battle, userId);
-  const displayedWinner = battle.settled_at ? battle.winner_id : battle.provisional_winner_id;
+  const displayedWinner = battle.settled_at ? battle.winner_id : battle.battle_mode === "normal" ? battle.provisional_winner_id : null;
   const won = displayedWinner === userId;
   const settled = Boolean(battle.settled_at);
   const draw = settled && !displayedWinner;
@@ -144,15 +155,18 @@ function ResultCard({
   const ownOfficial = mine?.attempt?.status === "approved";
   const ownDeclined = mine?.attempt?.status === "declined" || mine?.attempt?.status === "invalidated";
   const rankChanged = mine?.rank_before_name !== mine?.rank_after_name;
+  const waitingForResult = !settled && battle.battle_mode === "handicap";
+  const ownAdjusted = adjustedElapsed(battle, userId, mine?.elapsed_ms);
+  const otherAdjusted = adjustedElapsed(battle, otherId, other?.elapsed_ms);
   return (
     <article className={clsx("battle-result", won && "is-win", settled && !won && !draw && "is-loss", draw && "is-draw")}>
       <div className="battle-result__headline">
         <span>{won ? <Trophy aria-hidden="true" /> : <Shield aria-hidden="true" />}</span>
-        <div><p className="eyebrow">mod @{opponent.username}</p><h2>{ownDeclined && !settled ? "TID AFVIST" : draw ? "UAFGJORT" : won ? "DU VANDT" : "DU TABTE"}</h2></div>
+        <div><p className="eyebrow">mod @{opponent.username}</p><h2>{ownDeclined && !settled ? "TID AFVIST" : waitingForResult ? "AFVENTER" : draw ? "UAFGJORT" : won ? "DU VANDT" : "DU TABTE"}</h2></div>
       </div>
       <div className="battle-result__times">
-        <span>Din tid <strong>{mine?.elapsed_ms == null ? "-" : `${formatTime(mine.elapsed_ms)}s`}</strong></span>
-        <span>@{opponent.username} <strong>{other?.elapsed_ms == null ? "Drikker..." : `${formatTime(other.elapsed_ms)}s`}</strong></span>
+        <span>Din tid <strong>{mine?.elapsed_ms == null ? "-" : `${formatTime(mine.elapsed_ms)}s`}</strong>{battle.battle_mode === "handicap" && ownAdjusted != null && <small>Justeret {formatTime(ownAdjusted)}s</small>}</span>
+        <span>@{opponent.username} <strong>{other?.elapsed_ms == null ? "Drikker..." : `${formatTime(other.elapsed_ms)}s`}</strong>{battle.battle_mode === "handicap" && otherAdjusted != null && <small>Justeret {formatTime(otherAdjusted)}s</small>}</span>
       </div>
       {mine?.elo_after != null && (
         <div className="battle-result__rating">
@@ -193,10 +207,12 @@ function ReviewTasks({
         const otherId = battle.challenger_id === userId ? battle.opponent_id : battle.challenger_id;
         const other = participant(battle, otherId);
         const opponent = opponentFor(battle, userId);
+        const mineAdjusted = adjustedElapsed(battle, userId, mine?.elapsed_ms);
+        const otherAdjusted = adjustedElapsed(battle, otherId, other?.elapsed_ms);
         return (
           <article key={battle.id}>
             <Avatar username={opponent.username} path={opponent.avatar_path} size="small" />
-            <div><strong>@{opponent.username}</strong><span>{mine?.elapsed_ms == null ? "-" : `${formatTime(mine.elapsed_ms)}s`} / {other?.elapsed_ms == null ? "drikker" : `${formatTime(other.elapsed_ms)}s`}</span></div>
+            <div><strong>@{opponent.username}</strong><span>{mine?.elapsed_ms == null ? "-" : `${formatTime(mine.elapsed_ms)}s`} / {other?.elapsed_ms == null ? "drikker" : `${formatTime(other.elapsed_ms)}s`}{battle.battle_mode === "handicap" && mineAdjusted != null ? ` · justeret ${formatTime(mineAdjusted)}s/${otherAdjusted == null ? "…" : `${formatTime(otherAdjusted)}s`}` : ""}</span></div>
             {other?.attempt?.status === "pending_review" && <div className="battle-review-tasks__actions"><button className="icon-button battle-inbox__accept" title="Godkend tid" disabled={pending} onClick={() => review(battle.id, true)}><Check aria-hidden="true" /></button><button className="icon-button icon-button--danger" title="Afvis tid" disabled={pending} onClick={() => confirmDecline(`Er du sikker på, at du vil afvise @${opponent.username}s tid? Det kan ikke fortrydes.`, () => review(battle.id, false))}><X aria-hidden="true" /></button></div>}
             {mine?.attempt?.status === "pending_review" && <button className="text-button battle-review-tasks__self" disabled={pending} onClick={() => confirmDecline("Er du sikker på, at du vil afvise din egen tid? Det kan ikke fortrydes.", () => declineOwn(battle.id))}>Afvis min tid</button>}
           </article>
@@ -208,10 +224,12 @@ function ReviewTasks({
 
 function InvitationList({
   invitations,
+  userId,
   pending,
   respond,
 }: {
   invitations: Battle[];
+  userId: string;
   pending: boolean;
   respond: (battleId: string, accept: boolean) => void;
 }) {
@@ -220,14 +238,16 @@ function InvitationList({
     <section className="battle-inbox">
       <div className="battle-inbox__title"><Inbox aria-hidden="true" /><strong>{invitations.length} {invitations.length === 1 ? "udfordring" : "udfordringer"}</strong></div>
       <div className="battle-inbox__list">
-        {invitations.map((battle) => (
-          <article key={battle.id}>
+        {invitations.map((battle) => {
+          const projected = eloProjection(battle, userId);
+          const handicapPlayer = battle.handicap_user_id === battle.challenger_id ? battle.challenger : battle.opponent;
+          return <article key={battle.id}>
             <Avatar username={battle.challenger.username} path={battle.challenger.avatar_path} size="medium" />
-            <div><strong>@{battle.challenger.username}</strong><span><CategoryIcon iconKey={battle.category.icon_key} /> {battle.category.name} · {battle.clan?.name ?? "Global"}</span></div>
+            <div><strong>@{battle.challenger.username}</strong><span><CategoryIcon iconKey={battle.category.icon_key} /> {battle.category.name} · {battle.clan?.name ?? "Global"}</span>{battle.battle_mode === "handicap" && <small>@{handicapPlayer.username} får +{formatTime(battle.handicap_ms)}s · din sejr +{projected.win} / nederlag {projected.loss}</small>}{battle.repeat_opponent_count > 0 && <small>Kamp #{battle.repeat_opponent_count + 1} i træk · {Math.round(battle.elo_stake_multiplier * 100)}% Elo</small>}</div>
             <button className="icon-button battle-inbox__accept" aria-label={`Acceptér udfordring fra ${battle.challenger.username}`} disabled={pending} onClick={() => respond(battle.id, true)}><Check aria-hidden="true" /></button>
             <button className="icon-button icon-button--danger" aria-label={`Afvis udfordring fra ${battle.challenger.username}`} disabled={pending} onClick={() => respond(battle.id, false)}><X aria-hidden="true" /></button>
-          </article>
-        ))}
+          </article>;
+        })}
       </div>
     </section>
   );
@@ -235,6 +255,7 @@ function InvitationList({
 
 export function BattleStage({
   userId,
+  currentUser,
   categories,
   friends,
   clans,
@@ -242,6 +263,7 @@ export function BattleStage({
   initialHub,
 }: {
   userId: string;
+  currentUser: Pick<Profile, "username" | "avatar_path">;
   categories: Category[];
   friends: Friendship[];
   clans: BattleClan[];
@@ -256,13 +278,20 @@ export function BattleStage({
   const [selectedFriend, setSelectedFriend] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(categories[0]?.id ?? "");
   const [selectedClan, setSelectedClan] = useState<string | null>(null);
+  const [battleMode, setBattleMode] = useState<BattleMode>("normal");
+  const [handicapPreviewState, setHandicapPreviewState] = useState<{ categoryId: string; opponentId: string; data: BattleHandicapPreview } | null>(null);
+  const [handicapUserId, setHandicapUserId] = useState("");
+  const [handicapSeconds, setHandicapSeconds] = useState("");
+  const [handicapError, setHandicapError] = useState<string>();
   const [now, setNow] = useState(() => Date.now());
   const [freshResultId, setFreshResultId] = useState<string | null>(null);
   const [freshResultUntil, setFreshResultUntil] = useState(0);
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
   const [historyPending, startHistoryTransition] = useTransition();
+  const [handicapPending, startHandicapTransition] = useTransition();
   const polling = useRef(false);
+  const handicapRequest = useRef(0);
   const battle = hub.current;
   const battleStatus = battle?.status;
   const mine = battle ? participant(battle, userId) : undefined;
@@ -290,6 +319,21 @@ export function BattleStage({
     })
     .slice(0, 3);
   const selectedOpponent = friends.find((friend) => friend.other_user_id === selectedFriend);
+  const handicapPreview = handicapPreviewState?.categoryId === selectedCategory && handicapPreviewState.opponentId === selectedFriend
+    ? handicapPreviewState.data
+    : null;
+  const selectedHandicapMs = Math.round(Number(handicapSeconds) * 1000);
+  const handicapInputValid = handicapSeconds.trim() !== "" && Number.isSafeInteger(selectedHandicapMs) && selectedHandicapMs >= 0;
+  const handicapExpected = handicapPreview && handicapInputValid && [userId, selectedFriend].includes(handicapUserId)
+    ? handicapExpectedChallenger(handicapPreview, handicapUserId, userId, selectedHandicapMs)
+    : null;
+  const handicapFactor = handicapPreview ? handicapPreview.battle_elo_factor * handicapPreview.elo_stake_multiplier : 0;
+  const challengerHandicapProjection = handicapPreview && handicapExpected != null
+    ? projectedEloChange(handicapFactor, handicapExpected, handicapPreview.challenger_elo)
+    : null;
+  const opponentHandicapProjection = handicapPreview && handicapExpected != null
+    ? projectedEloChange(handicapFactor, 1 - handicapExpected, handicapPreview.opponent_elo)
+    : null;
 
   function applyHub(nextHub: BattleHub) {
     setHub(nextHub);
@@ -335,6 +379,24 @@ export function BattleStage({
     return () => window.clearTimeout(timeout);
   }, [freshResultUntil]);
 
+  useEffect(() => {
+    const request = ++handicapRequest.current;
+    if (battleMode !== "handicap" || !selectedFriend || !selectedCategory) return;
+    startHandicapTransition(async () => {
+      const result = await getBattleHandicapPreviewAction(selectedCategory, selectedFriend);
+      if (request !== handicapRequest.current) return;
+      if (!result.ok) {
+        setHandicapPreviewState(null);
+        setHandicapError(result.error);
+        return;
+      }
+      setHandicapPreviewState({ categoryId: selectedCategory, opponentId: selectedFriend, data: result.data });
+      setHandicapError(undefined);
+      setHandicapUserId(result.data.handicap_user_id);
+      setHandicapSeconds(String(result.data.suggested_handicap_ms / 1000));
+    });
+  }, [battleMode, selectedCategory, selectedFriend]);
+
   function run(
     action: () => Promise<{ ok: true; data: BattleHub } | { ok: false; error: string }>,
     onSuccess?: (nextHub: BattleHub) => void,
@@ -354,6 +416,10 @@ export function BattleStage({
   }
 
   const selectOpponent = (friend: Friendship) => {
+    handicapRequest.current += 1;
+    setHandicapPreviewState(null);
+    setHandicapUserId("");
+    setHandicapError(undefined);
     setSelectedFriend(friend.other_user_id);
     setOpponentQuery(friend.username);
     setSelectedClan(null);
@@ -397,11 +463,12 @@ export function BattleStage({
   if (running && battle) {
     const opponentFinished = Boolean(battle.provisional_winner_id && battle.provisional_winner_id !== userId);
     return (
-      <div className={clsx("battle-live", opponentFinished && "battle-live--lost")} style={{ "--accent": battle.category.accent_color } as React.CSSProperties}>
+      <div className={clsx("battle-live", opponentFinished && battle.battle_mode === "normal" && "battle-live--lost")} style={{ "--accent": battle.category.accent_color } as React.CSSProperties}>
         <button className="battle-live__surface" disabled={pending} onClick={() => run(() => stopBattleAction(battle.id), () => { setFreshResultId(battle.id); setFreshResultUntil(Date.now() + 90_000); })} aria-label="Stop din tid" />
         <div className="battle-live__content">
           <span className="battle-live__status"><i /> {opponentFinished ? "Modstanderen er færdig" : "1v1 i gang"}</span>
           <div className="timer-display">{formatTime(elapsed)}<small>SEKUNDER</small></div>
+          {battle.battle_mode === "handicap" && <span className="battle-live__handicap"><Gauge aria-hidden="true" /> {battle.handicap_user_id === userId ? `Dit handicap: +${formatTime(battle.handicap_ms)}s` : `@${opponentFor(battle, userId).username}: +${formatTime(battle.handicap_ms)}s`}</span>}
           <div className="stop-button"><CircleStop aria-hidden="true" /><span>{pending ? "STOPPER" : "STOP"}</span><small>Tryk hvor som helst</small></div>
           <span className="battle-live__opponent">mod @{opponentFor(battle, userId).username}</span>
         </div>
@@ -431,11 +498,11 @@ export function BattleStage({
   if (battle?.status === "pending") {
     return (
       <>
-        {!hub.has_active_timer && <InvitationList invitations={hub.invitations} pending={pending} respond={(id, accept) => run(() => respondBattleAction(id, accept))} />}
+        {!hub.has_active_timer && <InvitationList invitations={hub.invitations} userId={userId} pending={pending} respond={(id, accept) => run(() => respondBattleAction(id, accept))} />}
         <section className="battle-lobby battle-lobby--pending">
           <span className="battle-lobby__ready"><Clock3 aria-hidden="true" /></span>
           <h1>UDFORDRING SENDT</h1>
-          <EloPair battle={battle} userId={userId} />
+          <EloPair battle={battle} userId={userId} projections />
           <MatchSettings battle={battle} />
           <div className="battle-lobby__waiting"><span className="spin"><Clock3 aria-hidden="true" /></span><strong>Venter på @{battle.opponent.username}</strong></div>
           {error && <p className="form-message form-message--error">{error}</p>}
@@ -447,7 +514,7 @@ export function BattleStage({
 
   return (
     <>
-      {!hub.has_active_timer && <InvitationList invitations={hub.invitations} pending={pending} respond={(id, accept) => run(() => respondBattleAction(id, accept))} />}
+      {!hub.has_active_timer && <InvitationList invitations={hub.invitations} userId={userId} pending={pending} respond={(id, accept) => run(() => respondBattleAction(id, accept))} />}
       {resultBattle && <ResultCard battle={resultBattle} userId={userId} pending={pending} reviewOpponent={(approve) => run(() => reviewBattleTimeAction(resultBattle.id, approve))} declineOwn={() => run(() => declineOwnBattleTimeAction(resultBattle.id))} />}
 
       <section className="battle-home-card">
@@ -466,16 +533,34 @@ export function BattleStage({
           {friends.length && categories.length ? (
             <>
               <div className="battle-opponent-search">
-                <label htmlFor="battle-opponent"><Search aria-hidden="true" /><input id="battle-opponent" value={opponentQuery} onChange={(event) => { setOpponentQuery(event.target.value); setSelectedFriend(""); setSelectedClan(null); }} placeholder="Søg efter en ven..." autoComplete="off" /></label>
+                <label htmlFor="battle-opponent"><Search aria-hidden="true" /><input id="battle-opponent" value={opponentQuery} onChange={(event) => { handicapRequest.current += 1; setHandicapPreviewState(null); setHandicapUserId(""); setHandicapError(undefined); setOpponentQuery(event.target.value); setSelectedFriend(""); setSelectedClan(null); }} placeholder="Søg efter en ven..." autoComplete="off" /></label>
                 {searchResults.length > 0 && <div className="battle-opponent-search__results">{searchResults.map((friend) => <button key={friend.other_user_id} onClick={() => selectOpponent(friend)}><Avatar username={friend.username} path={friend.avatar_path} size="small" /><strong>@{friend.username}</strong><Play aria-hidden="true" /></button>)}</div>}
               </div>
               {!normalizedQuery && <div className="battle-suggestions"><span>Foreslåede modstandere</span>{suggestions.map((friend) => <button key={friend.other_user_id} className={clsx(selectedFriend === friend.other_user_id && "is-selected")} onClick={() => selectOpponent(friend)}><Avatar username={friend.username} path={friend.avatar_path} size="medium" /><strong>@{friend.username}</strong></button>)}</div>}
               {selectedOpponent && <div className="battle-selected-opponent"><Check aria-hidden="true" /><Avatar username={selectedOpponent.username} path={selectedOpponent.avatar_path} size="small" /><strong>@{selectedOpponent.username}</strong></div>}
 
-              <div className="battle-field"><strong>Vælg våben</strong><div className="category-grid">{categories.map((category) => <button key={category.id} className={clsx("category-card", selectedCategory === category.id && "is-selected")} style={{ "--category-color": category.accent_color } as React.CSSProperties} onClick={() => setSelectedCategory(category.id)}><CategoryVisual iconKey={category.icon_key} imagePath={category.image_path} name={category.name} /><strong>{category.name}</strong>{selectedCategory === category.id && <span className="category-card__check"><Check aria-hidden="true" /></span>}</button>)}</div></div>
+              <div className="battle-field"><strong>Kampform</strong><div className="battle-mode-picker"><button aria-pressed={battleMode === "normal"} className={clsx(battleMode === "normal" && "is-selected")} onClick={() => { handicapRequest.current += 1; setHandicapPreviewState(null); setHandicapUserId(""); setHandicapError(undefined); setBattleMode("normal"); }}><Swords aria-hidden="true" /><span><b>Normal</b><small>Elo afgør odds</small></span></button><button aria-pressed={battleMode === "handicap"} className={clsx(battleMode === "handicap" && "is-selected")} onClick={() => { setHandicapPreviewState(null); setHandicapUserId(""); setHandicapError(undefined); setBattleMode("handicap"); }}><Gauge aria-hidden="true" /><span><b>Handicap</b><small>Vælg hvem der får ekstra tid</small></span></button></div></div>
+
+              <div className="battle-field"><strong>Vælg våben</strong><div className="category-grid">{categories.map((category) => <button key={category.id} className={clsx("category-card", selectedCategory === category.id && "is-selected")} style={{ "--category-color": category.accent_color } as React.CSSProperties} onClick={() => { handicapRequest.current += 1; setHandicapPreviewState(null); setHandicapUserId(""); setHandicapError(undefined); setSelectedCategory(category.id); }}><CategoryVisual iconKey={category.icon_key} imagePath={category.image_path} name={category.name} /><strong>{category.name}</strong>{selectedCategory === category.id && <span className="category-card__check"><Check aria-hidden="true" /></span>}</button>)}</div></div>
+              {battleMode === "handicap" && <div className="battle-handicap-editor">
+                {handicapPending && <div className="inline-empty" role="status">Beregner fair handicap...</div>}
+                {handicapError && <p className="form-message form-message--error" role="alert">{handicapError}</p>}
+                {handicapPreview && selectedOpponent && <>
+                  <div className="battle-handicap-editor__summary"><Gauge aria-hidden="true" /><div><strong>Hvem skal have ekstra tid?</strong><small>Vælg én spiller. Den ekstra tid trækkes kun fra den valgte spillers sluttid.</small></div></div>
+                  <button type="button" className="battle-handicap-editor__suggestion" onClick={() => { setHandicapUserId(handicapPreview.handicap_user_id); setHandicapSeconds(String(handicapPreview.suggested_handicap_ms / 1000)); }}><Check aria-hidden="true" /><span><strong>Brug fair forslag</strong><small>{handicapPreview.handicap_user_id === userId ? "Du" : `@${selectedOpponent.username}`} får +{formatTime(handicapPreview.suggested_handicap_ms)}s · maksimal Elo-værdi</small></span></button>
+                  <div className="battle-handicap-players" aria-label="Vælg hvem der får ekstra tid">
+                    <button type="button" aria-pressed={handicapUserId === userId} className={clsx(handicapUserId === userId && "is-selected")} onClick={() => setHandicapUserId(userId)}><Avatar username={currentUser.username} path={currentUser.avatar_path} size="medium" /><span><strong>Dig</strong><small>Bedste tid {formatTime(handicapPreview.challenger_best_ms)}s</small></span><b>{handicapUserId === userId ? `+${handicapSeconds || "0"}s` : "+0s"}</b></button>
+                    <button type="button" aria-pressed={handicapUserId === selectedFriend} className={clsx(handicapUserId === selectedFriend && "is-selected")} onClick={() => setHandicapUserId(selectedFriend)}><Avatar username={selectedOpponent.username} path={selectedOpponent.avatar_path} size="medium" /><span><strong>@{selectedOpponent.username}</strong><small>Bedste tid {formatTime(handicapPreview.opponent_best_ms)}s</small></span><b>{handicapUserId === selectedFriend ? `+${handicapSeconds || "0"}s` : "+0s"}</b></button>
+                  </div>
+                  <label htmlFor="battle-handicap">Ekstra tid til {handicapUserId === userId ? "dig" : `@${selectedOpponent.username}`} <span><input id="battle-handicap" type="number" min={0} step={0.1} value={handicapSeconds} onChange={(event) => setHandicapSeconds(event.target.value)} required /> sek.</span></label>
+                  <p className="battle-handicap-editor__help">Elo og bedste tider beregner vinderchancen. Favoritten vinder mindre og taber mere; underdoggen vinder mere og taber mindre.</p>
+                  {handicapPreview.repeat_opponent_count > 0 && <p className="battle-handicap-editor__repeat">I har spillet {handicapPreview.repeat_opponent_count} {handicapPreview.repeat_opponent_count === 1 ? "kamp" : "kampe"} i træk. Elo er derfor reduceret til {Math.round(handicapPreview.elo_stake_multiplier * 100)}%. Spil mod en anden, så er næste indbyrdes kamp tilbage på 100%.</p>}
+                  {challengerHandicapProjection && opponentHandicapProjection && handicapExpected != null && <div className="battle-handicap-editor__stakes"><span><strong>Dig · {Math.round(handicapExpected * 100)}% chance</strong><small>Sejr +{challengerHandicapProjection.win} · nederlag {challengerHandicapProjection.loss}</small></span><span><strong>@{selectedOpponent.username} · {Math.round((1 - handicapExpected) * 100)}% chance</strong><small>Sejr +{opponentHandicapProjection.win} · nederlag {opponentHandicapProjection.loss}</small></span></div>}
+                </>}
+              </div>}
               <div className="battle-field"><strong>Vælg rangliste</strong><div className="battle-scopes"><button className={clsx(selectedClan === null && "is-selected")} onClick={() => setSelectedClan(null)}><Globe2 aria-hidden="true" /><span><strong>Global</strong></span></button>{sharedClans.map((clan) => <button key={clan.id} className={clsx(selectedClan === clan.id && "is-selected")} onClick={() => setSelectedClan(clan.id)}><ClanImage name={clan.name} path={clan.image_path} /><span><strong>{clan.name}</strong></span></button>)}</div></div>
               {error && <p className="form-message form-message--error">{error}</p>}
-              <button className="button button--start" disabled={pending || !selectedFriend || !selectedCategory} onClick={() => run(() => createBattleAction(selectedCategory, selectedClan, selectedFriend), () => setShowCreate(false))}><Swords aria-hidden="true" /><span>{pending ? "SENDER..." : "SEND UDFORDRING"}</span></button>
+              <button className="button button--start" disabled={pending || handicapPending || !selectedFriend || !selectedCategory || (battleMode === "handicap" && (!handicapPreview || ![userId, selectedFriend].includes(handicapUserId) || !handicapInputValid))} onClick={() => run(() => createBattleAction(selectedCategory, selectedClan, selectedFriend, battleMode, battleMode === "handicap" ? handicapUserId : null, battleMode === "handicap" ? selectedHandicapMs : 0), () => setShowCreate(false))}><Swords aria-hidden="true" /><span>{pending ? "SENDER..." : "SEND UDFORDRING"}</span></button>
             </>
           ) : <div className="inline-empty">Tilføj en ven for at starte en 1v1.</div>}
         </section>
@@ -486,7 +571,7 @@ export function BattleStage({
         <section className="battle-history"><div className="section-heading"><h2>SENESTE KAMPE</h2></div><div className="battle-history__list">{history.map((item) => {
           const own = participant(item, userId);
           const foe = opponentFor(item, userId);
-          return <article key={item.id}><Avatar username={foe.username} path={foe.avatar_path} size="small" /><div><strong>@{foe.username}</strong><small>{item.category.name} · {formatDate(item.completed_at ?? item.created_at)}</small></div><b>{item.winner_id ? item.winner_id === userId ? "V" : "T" : "U"}</b><span>{own?.elo_change != null ? `${own.elo_change >= 0 ? "+" : ""}${own.elo_change}` : "-"}</span></article>;
+          return <article key={item.id}><Avatar username={foe.username} path={foe.avatar_path} size="small" /><div><strong>@{foe.username}</strong><small>{item.category.name}{item.battle_mode === "handicap" ? ` · H +${formatTime(item.handicap_ms)}s` : ""} · {formatDate(item.completed_at ?? item.created_at)}</small></div><b>{item.winner_id ? item.winner_id === userId ? "V" : "T" : "U"}</b><span>{own?.elo_change != null ? `${own.elo_change >= 0 ? "+" : ""}${own.elo_change}` : "-"}</span></article>;
         })}</div>{historyHasMore && <button type="button" className="button button--ghost battle-history__more" disabled={historyPending} onClick={loadMoreHistory}>{historyPending ? "Henter..." : "Indlæs flere kampe"}</button>}</section>
       )}
       <RankProgression ranks={battleRanks} standing={hub.standing} />

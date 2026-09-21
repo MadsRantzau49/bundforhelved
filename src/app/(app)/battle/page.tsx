@@ -50,6 +50,7 @@ export default async function BattlePage() {
     <div className="page page--battle">
       <BattleStage
         userId={profile.id}
+        currentUser={{ username: profile.username, avatar_path: profile.avatar_path }}
         categories={(categoriesResult.data ?? []) as Category[]}
         friends={friends}
         clans={clans}
