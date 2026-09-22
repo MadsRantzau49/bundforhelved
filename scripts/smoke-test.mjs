@@ -222,7 +222,7 @@ try {
   });
   if (hiddenAttempts.length !== 0) throw new Error("RLS exposed another user's timer attempt.");
 
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await new Promise((resolve) => setTimeout(resolve, 350));
   const stopped = await request(`${baseUrl}/rest/v1/rpc/stop_attempt`, {
     method: "POST",
     headers: owner.headers,
@@ -317,7 +317,7 @@ try {
       body: JSON.stringify({ category: categories[0].id, clan: selectedClan, player }),
     });
     additionalAttemptIds.add(created.id);
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    await new Promise((resolve) => setTimeout(resolve, 350));
     const stoppedAttempt = await request(`${baseUrl}/rest/v1/rpc/stop_attempt`, {
       method: "POST",
       headers: actor.headers,
@@ -780,7 +780,7 @@ try {
     body: JSON.stringify({ category: categories[0].id, clan: null, player: owner.id }),
   });
   additionalAttemptIds.add(correctionAttempt.id);
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await new Promise((resolve) => setTimeout(resolve, 350));
   await request(`${baseUrl}/rest/v1/rpc/stop_attempt`, {
     method: "POST",
     headers: owner.headers,

@@ -233,6 +233,7 @@ describe("TimerStage", () => {
   });
 
   it("queues a stop touch received before the start request returns", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
     let resolveStart!: (value: Awaited<ReturnType<typeof startAttempt>>) => void;
     vi.mocked(startAttempt).mockReturnValue(new Promise((resolve) => { resolveStart = resolve; }));
     vi.mocked(stopAttempt).mockResolvedValue({
@@ -255,6 +256,7 @@ describe("TimerStage", () => {
     );
 
     fireEvent.touchStart(screen.getByRole("button", { name: /start timeren/i }));
+    now.mockReturnValue(1_300);
     fireEvent.touchStart(await screen.findByRole("button", { name: /stop timeren.*hvor som helst/i }));
     expect(screen.getByText("Stop registreret")).toBeInTheDocument();
     expect(stopAttempt).not.toHaveBeenCalled();
@@ -264,6 +266,30 @@ describe("TimerStage", () => {
     });
 
     await waitFor(() => expect(stopAttempt).toHaveBeenCalledWith("20000000-0000-4000-8000-000000000001"));
+  });
+
+  it("ignores stop input during the first 300 milliseconds", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_000);
+    vi.mocked(startAttempt).mockResolvedValue({
+      ok: true,
+      data: { attempt: attempt(), live_elapsed_ms: 0 },
+    });
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={null}
+        attemptCategory={null}
+        initialElapsedMs={0}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.touchStart(screen.getByRole("button", { name: /start timeren/i }));
+    const stopSurface = await screen.findByRole("button", { name: /stop timeren.*hvor som helst/i });
+    fireEvent.touchStart(stopSurface);
+
+    expect(stopAttempt).not.toHaveBeenCalled();
   });
 
   it("uses changed settings immediately without an apply button", async () => {

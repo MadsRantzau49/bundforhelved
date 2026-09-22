@@ -37,6 +37,8 @@ import { formatTime } from "@/lib/format";
 import { activateOnClick, activateOnTouchPointer, activateOnTouchStart } from "@/lib/immediate-touch";
 import type { Attempt, Category, TimerPlayer } from "@/types/app";
 
+const minimumTimerDurationMs = 300;
+
 export function TimerStage({
   categories,
   initialAttempt,
@@ -89,6 +91,7 @@ export function TimerStage({
   const stopRequestedRef = useRef(false);
   const startRequestedRef = useRef(false);
   const stopAfterStartRef = useRef(false);
+  const startActivatedAtRef = useRef(0);
   const startTouchGuard = useRef(0);
   const stopTouchGuard = useRef(0);
   const [stopQueued, setStopQueued] = useState(false);
@@ -374,6 +377,7 @@ export function TimerStage({
   async function handleStart() {
     if (!selectedId || !selectedPlayerId || startRequestedRef.current) return;
     startRequestedRef.current = true;
+    startActivatedAtRef.current = Date.now();
     setError(undefined);
     setStarting(true);
     elapsedRef.current = 0;
@@ -420,6 +424,8 @@ export function TimerStage({
   }
 
   function handleStop() {
+    if (Date.now() - startActivatedAtRef.current < minimumTimerDurationMs) return;
+    if (activeAttempt && elapsedRef.current < minimumTimerDurationMs) return;
     if (!activeAttempt) {
       if (startRequestedRef.current) {
         stopAfterStartRef.current = true;
