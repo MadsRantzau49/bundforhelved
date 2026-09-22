@@ -137,6 +137,34 @@ describe("TimerStage", () => {
     expect(stopAttempt).toHaveBeenCalledTimes(1);
   });
 
+  it("stops immediately on iPhone touch contact and suppresses compatibility events", async () => {
+    vi.mocked(stopAttempt).mockResolvedValue({
+      ok: true,
+      data: attempt({
+        status: "awaiting_confirmation",
+        stopped_at: "2099-01-01T00:00:02.000Z",
+        elapsed_ms: 2_000,
+      }),
+    });
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={attempt()}
+        attemptCategory={null}
+        initialElapsedMs={1_000}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    const stopSurface = screen.getByRole("button", { name: /stop timeren.*hvor som helst/i });
+    fireEvent.pointerDown(stopSurface, { pointerType: "touch", isPrimary: true, button: 0 });
+    fireEvent.touchStart(stopSurface);
+    fireEvent.click(stopSurface, { detail: 1 });
+
+    await waitFor(() => expect(stopAttempt).toHaveBeenCalledTimes(1));
+  });
+
   it("keeps cancellation in the separate bottom zone", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.mocked(declineAttempt).mockResolvedValue({
@@ -179,6 +207,63 @@ describe("TimerStage", () => {
     expect(screen.getByRole("button", { name: /start timeren/i })).toHaveClass("start-trigger");
     fireEvent.click(screen.getByRole("button", { name: /start timeren/i }));
     await waitFor(() => expect(startAttempt).toHaveBeenCalledWith(category.id, null, host.player_id));
+  });
+
+  it("starts immediately from touchstart when pointer events are unavailable", async () => {
+    vi.mocked(startAttempt).mockResolvedValue({
+      ok: true,
+      data: { attempt: attempt(), live_elapsed_ms: 0 },
+    });
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={null}
+        attemptCategory={null}
+        initialElapsedMs={0}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    const start = screen.getByRole("button", { name: /start timeren/i });
+    fireEvent.touchStart(start);
+    fireEvent.click(start, { detail: 1 });
+
+    await waitFor(() => expect(startAttempt).toHaveBeenCalledTimes(1));
+  });
+
+  it("queues a stop touch received before the start request returns", async () => {
+    let resolveStart!: (value: Awaited<ReturnType<typeof startAttempt>>) => void;
+    vi.mocked(startAttempt).mockReturnValue(new Promise((resolve) => { resolveStart = resolve; }));
+    vi.mocked(stopAttempt).mockResolvedValue({
+      ok: true,
+      data: attempt({
+        status: "awaiting_confirmation",
+        stopped_at: "2099-01-01T00:00:02.000Z",
+        elapsed_ms: 2_000,
+      }),
+    });
+    render(
+      <TimerStage
+        categories={[category]}
+        initialAttempt={null}
+        attemptCategory={null}
+        initialElapsedMs={0}
+        initialPlayers={[host]}
+        initialClanId={null}
+      />,
+    );
+
+    fireEvent.touchStart(screen.getByRole("button", { name: /start timeren/i }));
+    fireEvent.touchStart(await screen.findByRole("button", { name: /stop timeren.*hvor som helst/i }));
+    expect(screen.getByText("Stop registreret")).toBeInTheDocument();
+    expect(stopAttempt).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveStart({ ok: true, data: { attempt: attempt(), live_elapsed_ms: 0 } });
+    });
+
+    await waitFor(() => expect(stopAttempt).toHaveBeenCalledWith("20000000-0000-4000-8000-000000000001"));
   });
 
   it("uses changed settings immediately without an apply button", async () => {

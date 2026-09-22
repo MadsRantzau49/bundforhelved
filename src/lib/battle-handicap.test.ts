@@ -11,8 +11,6 @@ const preview: BattleHandicapPreview = {
   battle_elo_factor: 40,
   challenger_elo: 500,
   opponent_elo: 500,
-  repeat_opponent_count: 0,
-  elo_stake_multiplier: 1,
 };
 
 describe("battle handicap odds", () => {
@@ -53,10 +51,6 @@ describe("battle handicap odds", () => {
     expect(handicapExpectedChallenger(equalTimes, "opponent", "challenger", 0)).toBeCloseTo(10 / 11, 8);
   });
 
-  it("includes the consecutive-opponent multiplier", () => {
-    const expected = handicapExpectedChallenger(preview, "opponent", "challenger", preview.suggested_handicap_ms);
-    expect(projectedEloChange(40 * 0.5625, expected, 500)).toEqual({ win: 11, loss: -11 });
-  });
 });
 
 describe("battle Elo projections", () => {

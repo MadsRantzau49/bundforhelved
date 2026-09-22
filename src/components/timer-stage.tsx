@@ -34,6 +34,7 @@ import { ClanImage } from "@/components/clan-image";
 import { GuestConnectForm } from "@/components/guest-connect-form";
 import { useConnectionStatus } from "@/lib/connection-status";
 import { formatTime } from "@/lib/format";
+import { activateOnClick, activateOnTouchPointer, activateOnTouchStart } from "@/lib/immediate-touch";
 import type { Attempt, Category, TimerPlayer } from "@/types/app";
 
 export function TimerStage({
@@ -86,11 +87,16 @@ export function TimerStage({
   const mediaChunksRef = useRef<Blob[]>([]);
   const cameraPreviewRef = useRef<HTMLVideoElement | null>(null);
   const stopRequestedRef = useRef(false);
+  const startRequestedRef = useRef(false);
+  const stopAfterStartRef = useRef(false);
+  const startTouchGuard = useRef(0);
+  const stopTouchGuard = useRef(0);
+  const [stopQueued, setStopQueued] = useState(false);
   const [error, setError] = useState<string>();
   const online = useConnectionStatus();
   const previousOnline = useRef(online);
   const [pending, startTransition] = useTransition();
-  const runKey = activeAttempt?.status === "running" ? activeAttempt.id : null;
+  const runKey = activeAttempt?.status === "running" && !stopQueued ? activeAttempt.id : null;
   const playerId = activeAttempt?.user_id ?? selectedPlayerId;
   const player = players.find((item) => item.player_id === playerId);
   const clanId = activeAttempt ? activeAttempt.clan_id : selectedClanId;
@@ -366,13 +372,15 @@ export function TimerStage({
   }
 
   async function handleStart() {
-    if (!selectedId || !selectedPlayerId || starting) return;
+    if (!selectedId || !selectedPlayerId || startRequestedRef.current) return;
+    startRequestedRef.current = true;
     setError(undefined);
     setStarting(true);
     elapsedRef.current = 0;
     setElapsed(0);
 
     if (!beginEvidenceRecording()) {
+      startRequestedRef.current = false;
       setStarting(false);
       return;
     }
@@ -380,6 +388,8 @@ export function TimerStage({
     try {
       const result = await startAttempt(selectedId, selectedClanId, selectedPlayerId);
       if (!result.ok) {
+        stopAfterStartRef.current = false;
+        setStopQueued(false);
         void finishEvidenceRecording();
         setRecordEvidence(false);
         setCameraReady(false);
@@ -390,24 +400,45 @@ export function TimerStage({
       elapsedRef.current = result.data.live_elapsed_ms;
       setElapsed(result.data.live_elapsed_ms);
       setClockRevision((revision) => revision + 1);
-      setActiveAttempt(result.data.attempt);
+      const startedAttempt = result.data.attempt;
+      setActiveAttempt(startedAttempt);
       vibrate(50);
+      if (stopAfterStartRef.current) {
+        stopAfterStartRef.current = false;
+        setStopQueued(false);
+        stopRunningAttempt(startedAttempt);
+      }
     } catch {
+      stopAfterStartRef.current = false;
+      setStopQueued(false);
       setError("Uret kunne ikke startes. Siden opdateres for at kontrollere forsøget.");
       router.refresh();
     } finally {
+      startRequestedRef.current = false;
       setStarting(false);
     }
   }
 
   function handleStop() {
-    if (!activeAttempt || stopRequestedRef.current) return;
+    if (!activeAttempt) {
+      if (startRequestedRef.current) {
+        stopAfterStartRef.current = true;
+        setStopQueued(true);
+      }
+      return;
+    }
+    stopRunningAttempt(activeAttempt);
+  }
+
+  function stopRunningAttempt(attemptToStop: Attempt) {
+    if (stopRequestedRef.current) return;
     stopRequestedRef.current = true;
+    setStopQueued(true);
     setError(undefined);
     startTransition(async () => {
       try {
         const evidence = finishEvidenceRecording();
-        const result = await stopAttempt(activeAttempt.id);
+        const result = await stopAttempt(attemptToStop.id);
         if (!result.ok) {
           setError(result.error);
           router.refresh();
@@ -432,6 +463,7 @@ export function TimerStage({
         router.refresh();
       } finally {
         stopRequestedRef.current = false;
+        setStopQueued(false);
       }
     });
   }
@@ -632,12 +664,15 @@ export function TimerStage({
         <button
           type="button"
           className="timer-live__stop-surface"
-          onClick={handleStop}
-          disabled={pending || !activeAttempt}
+          onPointerDown={(event) => activateOnTouchPointer(event, stopTouchGuard, handleStop)}
+          onTouchStart={(event) => activateOnTouchStart(event, stopTouchGuard, handleStop)}
+          onClick={(event) => activateOnClick(event, stopTouchGuard, handleStop)}
+          disabled={pending}
+          aria-busy={pending || stopQueued}
           aria-label="Stop timeren - tryk hvor som helst på skærmen"
         />
         <div className="timer-live__content">
-          <div className="timer-live__status"><i /> {starting ? "Uret starter" : "Uret kører"}</div>
+          <div className="timer-live__status"><i /> {stopQueued ? "Stop registreret" : starting ? "Uret starter" : "Uret kører"}</div>
           <div className="timer-live__category">
             <CategoryIcon iconKey={category?.icon_key ?? "cup"} />
             <span>{category?.name} · {clan ? clan.name : "Global"} · @{player?.username}</span>
@@ -654,7 +689,7 @@ export function TimerStage({
           {error && <p className="form-message form-message--error" role="alert">{error}</p>}
           <div className="stop-button" aria-hidden="true">
             <CircleStop />
-            <span>STOP</span>
+            <span>{stopQueued ? "STOPPER" : "STOP"}</span>
             <small>tryk hvor som helst</small>
           </div>
         </div>
@@ -708,8 +743,11 @@ export function TimerStage({
         <button
           className="start-trigger"
           type="button"
-          onClick={handleStart}
+          onPointerDown={(event) => activateOnTouchPointer(event, startTouchGuard, () => void handleStart())}
+          onTouchStart={(event) => activateOnTouchStart(event, startTouchGuard, () => void handleStart())}
+          onClick={(event) => activateOnClick(event, startTouchGuard, () => void handleStart())}
           disabled={pending || starting || !selectedId || !selectedPlayerId || (recordEvidence && !cameraReady)}
+          aria-busy={starting}
           aria-label="Start timeren"
         >
           <Play aria-hidden="true" />

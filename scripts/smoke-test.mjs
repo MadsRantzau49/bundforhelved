@@ -478,7 +478,12 @@ try {
     body: JSON.stringify({ category: categories[0].id, opponent: observer.id }),
   });
   const handicapPreview = handicapPreviews[0];
-  if (!handicapPreview || ![owner.id, observer.id].includes(handicapPreview.handicap_user_id)) {
+  if (
+    !handicapPreview ||
+    ![owner.id, observer.id].includes(handicapPreview.handicap_user_id) ||
+    Number(handicapPreview.elo_stake_multiplier) !== 1 ||
+    handicapPreview.repeat_opponent_count !== 0
+  ) {
     throw new Error("The 1v1 handicap preview did not return a valid suggestion.");
   }
   const handicapBattleId = await request(`${baseUrl}/rest/v1/rpc/create_battle`, {

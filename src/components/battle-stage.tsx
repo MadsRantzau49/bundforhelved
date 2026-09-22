@@ -40,6 +40,7 @@ import { ClanImage } from "@/components/clan-image";
 import { formatDate, formatTime } from "@/lib/format";
 import { handicapExpectedChallenger, projectedEloChange } from "@/lib/battle-handicap";
 import { rankMediaUrl } from "@/lib/rank-media";
+import { activateOnClick, activateOnTouchPointer, activateOnTouchStart } from "@/lib/immediate-touch";
 import type { Battle, BattleClan, BattleHandicapPreview, BattleHub, BattleMode, BattleRank, BattleStanding, Category, Friendship, Profile } from "@/types/app";
 
 function participant(battle: Battle, userId: string) {
@@ -75,10 +76,10 @@ function eloProjection(battle: Battle, userId: string) {
   if (battle.battle_mode === "handicap") {
     const challengerExpected = battle.handicap_expected_challenger ?? 0.5;
     const expected = userId === battle.challenger_id ? challengerExpected : 1 - challengerExpected;
-    return projectedEloChange(battle.battle_elo_factor * battle.elo_stake_multiplier, expected, mine);
+    return projectedEloChange(battle.battle_elo_factor, expected, mine);
   }
   const expected = 1 / (1 + 10 ** ((other - mine) / 400));
-  return projectedEloChange(battle.battle_elo_factor * battle.elo_stake_multiplier, expected, mine);
+  return projectedEloChange(battle.battle_elo_factor, expected, mine);
 }
 
 function EloPair({ battle, userId, projections = false }: { battle: Battle; userId: string; projections?: boolean }) {
@@ -104,7 +105,6 @@ function MatchSettings({ battle }: { battle: Battle }) {
       <span><CategoryIcon iconKey={battle.category.icon_key} /> <strong>{battle.category.name}</strong><small>Våben</small></span>
       <span>{battle.clan ? <UsersRound aria-hidden="true" /> : <Globe2 aria-hidden="true" />} <strong>{battle.clan?.name ?? "Global"}</strong><small>Rangliste</small></span>
       {battle.battle_mode === "handicap" && <span className="battle-match-settings__handicap"><Gauge aria-hidden="true" /> <strong>@{handicapPlayer.username} får +{formatTime(battle.handicap_ms)}s</strong><small>Handicap · trækkes fra sluttiden</small></span>}
-      {battle.repeat_opponent_count > 0 && <span><Shield aria-hidden="true" /> <strong>{Math.round(battle.elo_stake_multiplier * 100)}% ELO</strong><small>Kamp #{battle.repeat_opponent_count + 1} i træk mod samme spiller</small></span>}
     </div>
   );
 }
@@ -243,7 +243,7 @@ function InvitationList({
           const handicapPlayer = battle.handicap_user_id === battle.challenger_id ? battle.challenger : battle.opponent;
           return <article key={battle.id}>
             <Avatar username={battle.challenger.username} path={battle.challenger.avatar_path} size="medium" />
-            <div><strong>@{battle.challenger.username}</strong><span><CategoryIcon iconKey={battle.category.icon_key} /> {battle.category.name} · {battle.clan?.name ?? "Global"}</span>{battle.battle_mode === "handicap" && <small>@{handicapPlayer.username} får +{formatTime(battle.handicap_ms)}s · din sejr +{projected.win} / nederlag {projected.loss}</small>}{battle.repeat_opponent_count > 0 && <small>Kamp #{battle.repeat_opponent_count + 1} i træk · {Math.round(battle.elo_stake_multiplier * 100)}% Elo</small>}</div>
+            <div><strong>@{battle.challenger.username}</strong><span><CategoryIcon iconKey={battle.category.icon_key} /> {battle.category.name} · {battle.clan?.name ?? "Global"}</span>{battle.battle_mode === "handicap" && <small>@{handicapPlayer.username} får +{formatTime(battle.handicap_ms)}s · din sejr +{projected.win} / nederlag {projected.loss}</small>}</div>
             <button className="icon-button battle-inbox__accept" aria-label={`Acceptér udfordring fra ${battle.challenger.username}`} disabled={pending} onClick={() => respond(battle.id, true)}><Check aria-hidden="true" /></button>
             <button className="icon-button icon-button--danger" aria-label={`Afvis udfordring fra ${battle.challenger.username}`} disabled={pending} onClick={() => respond(battle.id, false)}><X aria-hidden="true" /></button>
           </article>;
@@ -292,6 +292,10 @@ export function BattleStage({
   const [handicapPending, startHandicapTransition] = useTransition();
   const polling = useRef(false);
   const handicapRequest = useRef(0);
+  const battleStartRequested = useRef(false);
+  const battleStopRequested = useRef(false);
+  const battleStartTouchGuard = useRef(0);
+  const battleStopTouchGuard = useRef(0);
   const battle = hub.current;
   const battleStatus = battle?.status;
   const mine = battle ? participant(battle, userId) : undefined;
@@ -327,7 +331,7 @@ export function BattleStage({
   const handicapExpected = handicapPreview && handicapInputValid && [userId, selectedFriend].includes(handicapUserId)
     ? handicapExpectedChallenger(handicapPreview, handicapUserId, userId, selectedHandicapMs)
     : null;
-  const handicapFactor = handicapPreview ? handicapPreview.battle_elo_factor * handicapPreview.elo_stake_multiplier : 0;
+  const handicapFactor = handicapPreview?.battle_elo_factor ?? 0;
   const challengerHandicapProjection = handicapPreview && handicapExpected != null
     ? projectedEloChange(handicapFactor, handicapExpected, handicapPreview.challenger_elo)
     : null;
@@ -400,6 +404,7 @@ export function BattleStage({
   function run(
     action: () => Promise<{ ok: true; data: BattleHub } | { ok: false; error: string }>,
     onSuccess?: (nextHub: BattleHub) => void,
+    onSettled?: () => void,
   ) {
     setError(undefined);
     startTransition(async () => {
@@ -411,8 +416,26 @@ export function BattleStage({
         } else setError(result.error);
       } catch {
         setError("Forbindelsen røg. Prøv igen.");
+      } finally {
+        onSettled?.();
       }
     });
+  }
+
+  function handleBattleStart() {
+    if (!battle || battleStartRequested.current) return;
+    battleStartRequested.current = true;
+    run(() => startBattleAction(battle.id), undefined, () => { battleStartRequested.current = false; });
+  }
+
+  function handleBattleStop() {
+    if (!battle || battleStopRequested.current) return;
+    battleStopRequested.current = true;
+    run(
+      () => stopBattleAction(battle.id),
+      () => { setFreshResultId(battle.id); setFreshResultUntil(Date.now() + 90_000); },
+      () => { battleStopRequested.current = false; },
+    );
   }
 
   const selectOpponent = (friend: Friendship) => {
@@ -464,7 +487,7 @@ export function BattleStage({
     const opponentFinished = Boolean(battle.provisional_winner_id && battle.provisional_winner_id !== userId);
     return (
       <div className={clsx("battle-live", opponentFinished && battle.battle_mode === "normal" && "battle-live--lost")} style={{ "--accent": battle.category.accent_color } as React.CSSProperties}>
-        <button className="battle-live__surface" disabled={pending} onClick={() => run(() => stopBattleAction(battle.id), () => { setFreshResultId(battle.id); setFreshResultUntil(Date.now() + 90_000); })} aria-label="Stop din tid" />
+        <button type="button" className="battle-live__surface" disabled={pending} onPointerDown={(event) => activateOnTouchPointer(event, battleStopTouchGuard, handleBattleStop)} onTouchStart={(event) => activateOnTouchStart(event, battleStopTouchGuard, handleBattleStop)} onClick={(event) => activateOnClick(event, battleStopTouchGuard, handleBattleStop)} aria-label="Stop din tid" aria-busy={pending} />
         <div className="battle-live__content">
           <span className="battle-live__status"><i /> {opponentFinished ? "Modstanderen er færdig" : "1v1 i gang"}</span>
           <div className="timer-display">{formatTime(elapsed)}<small>SEKUNDER</small></div>
@@ -486,7 +509,7 @@ export function BattleStage({
         <MatchSettings battle={battle} />
         {error && <p className="form-message form-message--error">{error}</p>}
         {challenger ? (
-          <button className="button button--start battle-lobby__start" disabled={pending} onClick={() => run(() => startBattleAction(battle.id))}><Play aria-hidden="true" /><span>{pending ? "STARTER..." : "START UDFORDRING"}</span></button>
+          <button type="button" className="button button--start battle-lobby__start" disabled={pending} onPointerDown={(event) => activateOnTouchPointer(event, battleStartTouchGuard, handleBattleStart)} onTouchStart={(event) => activateOnTouchStart(event, battleStartTouchGuard, handleBattleStart)} onClick={(event) => activateOnClick(event, battleStartTouchGuard, handleBattleStart)} aria-busy={pending}><Play aria-hidden="true" /><span>{pending ? "STARTER..." : "START UDFORDRING"}</span></button>
         ) : (
           <div className="battle-lobby__waiting"><span className="spin"><Clock3 aria-hidden="true" /></span><strong>@{battle.challenger.username} starter kampen</strong></div>
         )}
@@ -554,7 +577,6 @@ export function BattleStage({
                   </div>
                   <label htmlFor="battle-handicap">Ekstra tid til {handicapUserId === userId ? "dig" : `@${selectedOpponent.username}`} <span><input id="battle-handicap" type="number" min={0} step={0.1} value={handicapSeconds} onChange={(event) => setHandicapSeconds(event.target.value)} required /> sek.</span></label>
                   <p className="battle-handicap-editor__help">Elo og bedste tider beregner vinderchancen. Favoritten vinder mindre og taber mere; underdoggen vinder mere og taber mindre.</p>
-                  {handicapPreview.repeat_opponent_count > 0 && <p className="battle-handicap-editor__repeat">I har spillet {handicapPreview.repeat_opponent_count} {handicapPreview.repeat_opponent_count === 1 ? "kamp" : "kampe"} i træk. Elo er derfor reduceret til {Math.round(handicapPreview.elo_stake_multiplier * 100)}%. Spil mod en anden, så er næste indbyrdes kamp tilbage på 100%.</p>}
                   {challengerHandicapProjection && opponentHandicapProjection && handicapExpected != null && <div className="battle-handicap-editor__stakes"><span><strong>Dig · {Math.round(handicapExpected * 100)}% chance</strong><small>Sejr +{challengerHandicapProjection.win} · nederlag {challengerHandicapProjection.loss}</small></span><span><strong>@{selectedOpponent.username} · {Math.round((1 - handicapExpected) * 100)}% chance</strong><small>Sejr +{opponentHandicapProjection.win} · nederlag {opponentHandicapProjection.loss}</small></span></div>}
                 </>}
               </div>}

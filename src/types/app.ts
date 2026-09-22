@@ -264,8 +264,6 @@ export type BattleHandicapPreview = {
   battle_elo_factor: number;
   challenger_elo: number;
   opponent_elo: number;
-  repeat_opponent_count: number;
-  elo_stake_multiplier: number;
 };
 
 export type BattleParticipant = {
@@ -298,8 +296,6 @@ export type Battle = {
   challenger_best_ms: number | null;
   opponent_best_ms: number | null;
   handicap_expected_challenger: number | null;
-  repeat_opponent_count: number;
-  elo_stake_multiplier: number;
   battle_elo_factor: number;
   status: BattleStatus;
   starts_at: string | null;
